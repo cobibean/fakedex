@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createChart, ColorType, IChartApi, CandlestickSeries } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, UTCTimestamp } from 'lightweight-charts';
 import { Candle } from '@/lib/chaosEngine';
 
 interface ChartProps {
@@ -21,7 +21,7 @@ export function Chart({ data, colors: {
 } = {} }: ChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ReturnType<IChartApi['addSeries']> | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -69,16 +69,14 @@ export function Chart({ data, colors: {
 
   useEffect(() => {
     if (seriesRef.current && data.length > 0) {
-      // Lightweight charts requires strictly ascending time. 
-      // Chaos Engine generates strictly ascending, but we verify/map just in case.
-      const formattedData = data.map(d => ({
-        time: d.time as any, // Lightweight charts accepts timestamp numbers
+      const formattedData: CandlestickData[] = data.map((d) => ({
+        time: d.time as UTCTimestamp,
         open: d.open,
         high: d.high,
         low: d.low,
         close: d.close,
       }));
-      
+
       seriesRef.current.setData(formattedData);
     }
   }, [data]);

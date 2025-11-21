@@ -7,6 +7,7 @@ export interface User {
   avatar: string | null;
   created_at: string;
   last_faucet_claim_at: string | null;
+  last_login_at?: string | null;
 }
 
 export interface Pair {
@@ -27,5 +28,14 @@ export interface Trade {
   price: number;
   leverage: number;
   created_at: string;
+}
+
+export interface Achievement {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  nsfw_flag: boolean;
+  earned_at?: string;
 }
 

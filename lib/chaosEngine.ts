@@ -1,5 +1,3 @@
-import { Pair } from './types';
-
 export interface Candle {
   time: number; // Unix timestamp
   open: number;
@@ -12,9 +10,8 @@ export interface Candle {
 // Helper to generate a new candle based on previous close and chaos parameters
 export function generateNextCandle(
   previousClose: number,
-  chaosLevel: number, // 0-100
+  chaosLevel: number,
   time: number,
-  intervalSeconds: number = 60
 ): Candle {
   // Chaos factor: 0.0 = calm, 1.0 = absolute mayhem
   const chaosFactor = Math.max(0, Math.min(100, chaosLevel)) / 100;
@@ -67,7 +64,7 @@ export function generateInitialHistory(
   let currentTime = Math.floor(Date.now() / 1000) - (count * intervalSeconds);
 
   for (let i = 0; i < count; i++) {
-    const candle = generateNextCandle(currentPrice, chaosLevel, currentTime, intervalSeconds);
+    const candle = generateNextCandle(currentPrice, chaosLevel, currentTime);
     history.push(candle);
     currentPrice = candle.close;
     currentTime += intervalSeconds;

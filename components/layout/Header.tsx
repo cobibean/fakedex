@@ -1,8 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { ConnectButton } from "thirdweb/react";
 import { client } from "@/lib/thirdwebClient";
-import { Menu } from 'lucide-react';
+import { Menu, User } from 'lucide-react';
 
 export function Header({ toggleSidebar }: { toggleSidebar?: () => void }) {
   return (
@@ -29,6 +30,14 @@ export function Header({ toggleSidebar }: { toggleSidebar?: () => void }) {
            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
            <span className="text-xs text-gray-400 font-mono">SYSTEM ONLINE</span>
         </div>
+
+        <Link
+          href="/profile/me"
+          className="hidden md:flex items-center gap-2 px-3 py-1 text-xs font-bold uppercase tracking-wide bg-gray-900/70 border border-gray-800 rounded-full hover:border-green-500 transition-colors"
+        >
+          <User className="w-3 h-3" />
+          Profile
+        </Link>
         
         <ConnectButton client={client} theme="dark" />
       </div>

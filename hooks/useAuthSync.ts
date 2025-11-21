@@ -2,14 +2,14 @@
 
 import { useEffect } from 'react';
 import { useActiveAccount } from "thirdweb/react";
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
 export function useAuthSync() {
   const account = useActiveAccount();
   const address = account?.address;
 
   useEffect(() => {
-    if (!address) return;
+    if (!address || !isSupabaseConfigured || !supabase) return;
 
     const syncUser = async () => {
       try {

@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { useActiveAccount } from "thirdweb/react";
-import { Loader2, ArrowDownUp, Wallet, TrendingUp, Zap } from 'lucide-react';
+import { Loader2, Wallet, TrendingUp, Zap } from 'lucide-react';
 import { useFakeDexSwapPreview, useFakeDexSwap } from '@/hooks/useFakeDexContracts';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
 interface TradePanelProps {
     symbol: string;
@@ -23,9 +23,29 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
     const { data: preview, isLoading: previewLoading } = useFakeDexSwapPreview(amount, symbol, currentPrice, leverage);
     const { swapAsync } = useFakeDexSwap();
 
+    if (!account?.address) {
+        return (
+            <div className="glass-panel rounded-xl p-6 border border-gray-800">
+                <p className="text-sm text-center text-gray-500">Connect wallet to trade.</p>
+            </div>
+        );
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+        return (
+            <div className="glass-panel rounded-xl p-6 border border-gray-800">
+                <p className="text-sm text-center text-gray-500">Configure Supabase to enable trading.</p>
+            </div>
+        );
+    }
+
     const handleTrade = async () => {
         if (!account?.address) {
             alert("Connect wallet to trade!");
+            return;
+        }
+        if (!isSupabaseConfigured || !supabase) {
+            alert("Configure Supabase to enable trading.");
             return;
         }
         if (!amount || parseFloat(amount) <= 0) return;
@@ -221,9 +241,6 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                     )}
                 </button>
                 
-                {!account && (
-                     <p className="text-xs text-center text-red-400">Wallet not connected</p>
-                )}
             </div>
         </div>
     );

@@ -1,5 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect } from 'react';
-import { Pair } from '@/lib/types';
 
 export function useFakeDexContracts() {
   // In V1, these just return stubbed values to simulate contract connection
@@ -73,12 +73,18 @@ export function useFakeDexSwapPreview(
 export function useFakeDexSwap() {
     const [isLoading, setIsLoading] = useState(false);
 
-    const swapAsync = async (params: {
-        symbol: string,
-        side: 'buy' | 'sell',
-        amount: number,
-        leverage: number,
-        price: number
+    const swapAsync = async ({
+        symbol,
+        side,
+        amount,
+        leverage,
+        price,
+    }: {
+        symbol: string;
+        side: 'buy' | 'sell';
+        amount: number;
+        leverage: number;
+        price: number;
     }) => {
         setIsLoading(true);
         
@@ -86,7 +92,7 @@ export function useFakeDexSwap() {
         await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 2000));
         
         setIsLoading(false);
-        return { status: 'success', txHash: '0xFAKE...' + Math.random().toString(16).slice(2) };
+        return { status: 'success', txHash: `0xFAKE${symbol}${side}${amount}${leverage}${price}` };
     };
 
     return { swapAsync, isLoading };

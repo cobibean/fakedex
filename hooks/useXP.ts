@@ -1,23 +1,8 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { useActiveAccount } from "thirdweb/react";
-
-export interface UserProfile {
-  id: string;
-  username: string;
-  xp: number;
-  level: number;
-  avatar: string;
-}
-
-export interface Achievement {
-  id: string;
-  code: string;
-  name: string;
-  description: string;
-  nsfw_flag: boolean;
-  earned_at?: string; // If joined with user_achievements
-}
+import { DEFAULT_PROFILE } from '@/lib/mockData';
+import type { User as UserProfile } from '@/lib/types';
 
 export function useXP() {
   const account = useActiveAccount();
@@ -25,8 +10,8 @@ export function useXP() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!account?.address) {
-      setProfile(null);
+    if (!account?.address || !isSupabaseConfigured || !supabase) {
+      setProfile(DEFAULT_PROFILE);
       setLoading(false);
       return;
     }
@@ -45,6 +30,8 @@ export function useXP() {
         
         if (data) {
           setProfile(data);
+        } else {
+          setProfile(DEFAULT_PROFILE);
         }
       } catch (err) {
         console.error("XP hook error:", err);
@@ -56,6 +43,8 @@ export function useXP() {
     fetchProfile();
 
     // Realtime subscription for XP updates
+    if (!isSupabaseConfigured || !supabase) return;
+
     const subscription = supabase
       .channel('xp-updates')
       .on('postgres_changes', { 

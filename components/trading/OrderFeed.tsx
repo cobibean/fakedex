@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { Trade } from '@/lib/types';
+import { DEFAULT_TRADES } from '@/lib/mockData';
 
 export function OrderFeed({ activeSymbol }: { activeSymbol?: string }) {
   const [trades, setTrades] = useState<Trade[]>([]);
 
   useEffect(() => {
     const fetchInitial = async () => {
+      if (!isSupabaseConfigured || !supabase) {
+        setTrades(
+          activeSymbol
+            ? DEFAULT_TRADES.filter((trade) => trade.symbol === activeSymbol)
+            : DEFAULT_TRADES
+        );
+        return;
+      }
+
       let query = supabase
         .from('trades')
         .select('*')
@@ -22,6 +32,8 @@ export function OrderFeed({ activeSymbol }: { activeSymbol?: string }) {
     };
 
     fetchInitial();
+
+    if (!isSupabaseConfigured || !supabase) return;
 
     const subscription = supabase
       .channel('public:trades')

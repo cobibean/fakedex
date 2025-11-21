@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, User, BarChart2, Settings, Trophy } from 'lucide-react';
+import { User, BarChart2, Trophy } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const NAV_ITEMS = [
@@ -64,7 +64,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
                    <span className="text-xs font-bold text-purple-400">Vic Says:</span>
                 </div>
                 <p className="text-xs text-gray-500 italic">
-                   "Leverage is just a number. Liquidation is a lifestyle."
+                   &ldquo;Leverage is just a number. Liquidation is a lifestyle.&rdquo;
                 </p>
              </div>
           </div>

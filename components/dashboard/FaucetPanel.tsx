@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useActiveAccount } from "thirdweb/react";
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { Droplets, Loader2 } from 'lucide-react';
 
 export function FaucetPanel() {
@@ -14,7 +14,7 @@ export function FaucetPanel() {
   const [canClaim, setCanClaim] = useState(false);
 
   useEffect(() => {
-    if (!address) return;
+    if (!address || !isSupabaseConfigured || !supabase) return;
 
     const checkEligibility = async () => {
       const { data: user } = await supabase
@@ -50,7 +50,7 @@ export function FaucetPanel() {
   }, [address]);
 
   const handleClaim = async () => {
-    if (!address || !canClaim) return;
+    if (!address || !canClaim || !isSupabaseConfigured || !supabase) return;
     setLoading(true);
 
     try {
@@ -105,7 +105,23 @@ export function FaucetPanel() {
     }
   };
 
-  if (!address) return null;
+  if (!address) {
+    return (
+      <div className="glass-panel rounded-xl p-4 border border-gray-800">
+        <div className="text-sm text-gray-500">Connect your wallet to access the daily faucet.</div>
+      </div>
+    );
+  }
+
+  if (!isSupabaseConfigured || !supabase) {
+    return (
+      <div className="glass-panel rounded-xl p-4 border border-gray-800">
+        <div className="text-sm text-gray-500">
+          Configure Supabase env vars to enable the faucet.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-panel rounded-xl p-4 border border-gray-800 bg-gradient-to-br from-gray-900 to-gray-900/50 relative overflow-hidden group">

@@ -8,10 +8,19 @@ interface PairRowProps {
   onClick?: () => void;
 }
 
+function getPseudoRandomForSymbol(symbol: string) {
+  let hash = 0;
+  for (let i = 0; i < symbol.length; i++) {
+    hash = (hash << 5) - hash + symbol.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
 export function PairRow({ pair, isSelected, onClick }: PairRowProps) {
-  // Mock change for now - in real app we'd diff against 24h ago from DB
-  const isGreen = Math.random() > 0.5; 
-  const change = (Math.random() * 20).toFixed(2);
+  const hash = getPseudoRandomForSymbol(pair.symbol);
+  const isGreen = hash % 2 === 0;
+  const change = ((hash % 2000) / 100).toFixed(2);
 
   return (
     <div 

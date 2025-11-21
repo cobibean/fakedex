@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { Pair } from '@/lib/types';
 
 export function useBotTrades(pairs: Pair[], enabled: boolean = true) {
   useEffect(() => {
-    if (!enabled || pairs.length === 0) return;
+    if (!enabled || pairs.length === 0 || !isSupabaseConfigured || !supabase) return;
 
     const interval = setInterval(async () => {
       // 1. Pick a random pair

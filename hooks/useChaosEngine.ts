@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useEffect, useRef } from 'react';
 import { generateNextCandle, generateInitialHistory, Candle } from '@/lib/chaosEngine';
-import { supabase } from '@/lib/supabaseClient';
-import { Pair } from '@/lib/types';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
 interface UseChaosEngineOptions {
   symbol: string;
@@ -21,17 +21,21 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
   // 1. Fetch Global Chaos & Pair Override
   useEffect(() => {
     const fetchChaosConfig = async () => {
-      // Fetch global setting
+      if (!isSupabaseConfigured || !supabase) {
+        setGlobalChaos(50);
+        setChaosLevel(50);
+        return;
+      }
+
       const { data: settings } = await supabase
         .from('settings')
         .select('value')
         .eq('key', 'global_chaos_level')
         .single();
       
-      const globalLevel = settings?.value?.level || 50; // Default to 50 if missing
+      const globalLevel = settings?.value?.level ?? 50;
       setGlobalChaos(globalLevel);
 
-      // Fetch pair override
       const { data: pairData } = await supabase
         .from('pairs')
         .select('chaos_override')
@@ -40,23 +44,21 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
       
       const override = pairData?.chaos_override;
       
-      // Determine effective chaos
-      // If override is not null/undefined, use it. Else use global.
       setChaosLevel(override !== null && override !== undefined ? override : globalLevel);
     };
 
     fetchChaosConfig();
 
-    // Subscribe to changes in settings and pairs for real-time updates
+    if (!isSupabaseConfigured || !supabase) {
+      return;
+    }
+
     const subscription = supabase
       .channel('chaos-updates')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'settings' }, (payload) => {
          if (payload.new.key === 'global_chaos_level') {
             const newGlobal = payload.new.value.level;
             setGlobalChaos(newGlobal);
-            // We'll need to re-check override here ideally, but for V1 simple reactivity:
-            // If we don't have an override, update local level.
-            // (Optimally we'd store 'hasOverride' in state, but let's trust the effect re-run or simple check)
             setChaosLevel((prev) => prev === globalChaos ? newGlobal : prev); 
          }
       })
@@ -67,7 +69,7 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, [symbol, globalChaos]);
 

@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { useActiveAccount } from "thirdweb/react";
 
 export function useAchievementCheck() {
   const account = useActiveAccount();
 
   useEffect(() => {
-    if (!account?.address) return;
+    if (!account?.address || !isSupabaseConfigured || !supabase) return;
 
     // Listen for NEW trades by this user
     const subscription = supabase
