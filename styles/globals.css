@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  
+  /* Degen Palette */
+  --color-terminal-green: #00ff00;
+  --color-terminal-red: #ff0000;
+  --color-terminal-dim: #333333;
+  --color-accent-cyan: #00ffff;
+  --color-accent-pink: #ff00ff;
+  
+  /* Custom colors for components */
+  --card-bg: #111111;
+  --card-border: #333333;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Courier New', Courier, monospace; /* Terminal vibe */
+}
+
+/* Utility classes for scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #000;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Custom utility classes */
+.glass-panel {
+  background: rgba(17, 17, 17, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--card-border);
+}
+
+.text-terminal-green {
+  color: var(--color-terminal-green);
+  text-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+}
+
+.text-terminal-red {
+  color: var(--color-terminal-red);
+  text-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
+}
+
+.border-terminal-green {
+  border-color: var(--color-terminal-green);
+  box-shadow: 0 0 5px rgba(0, 255, 0, 0.2);
+}
+
