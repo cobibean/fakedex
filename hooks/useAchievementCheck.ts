@@ -8,8 +8,11 @@ export function useAchievementCheck() {
   useEffect(() => {
     if (!account?.address || !isSupabaseConfigured || !supabase) return;
 
+    // Store reference to avoid null checks in async callbacks
+    const db = supabase;
+
     // Listen for NEW trades by this user
-    const subscription = supabase
+    const subscription = db
       .channel('achievement-checker')
       .on('postgres_changes', { 
         event: 'INSERT', 
@@ -28,7 +31,7 @@ export function useAchievementCheck() {
         // For V1 client-side simulation:
         
         // 1. Get Current User
-        const { data: user } = await supabase
+        const { data: user } = await db
             .from('users')
             .select('id')
             .eq('wallet_address', account.address)
@@ -51,14 +54,15 @@ export function useAchievementCheck() {
         // 3. Award Achievements
         if (earnedBadges.length > 0) {
             // Fetch IDs
-            const { data: badges } = await supabase
+            const { data: badges } = await db
                 .from('achievements')
                 .select('id, name')
                 .in('code', earnedBadges);
             
             if (badges) {
                 for (const badge of badges) {
-                    const { error } = await supabase
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const { error } = await (db as any)
                         .from('user_achievements')
                         .insert({ user_id: user.id, achievement_id: badge.id })
                         .ignoreDuplicates(); // Important!
@@ -71,15 +75,15 @@ export function useAchievementCheck() {
         }
         
         // 4. Award XP (Simple: 10 XP per trade)
-        await supabase.rpc('increment_xp', { user_id: user.id, amount: 10 }); 
+        await db.rpc('increment_xp', { user_id: user.id, amount: 10 }); 
         // Note: We need to create this RPC or just update manually. 
         // Manual update for V1:
-        const { data: currentUser } = await supabase.from('users').select('xp, level').eq('id', user.id).single();
+        const { data: currentUser } = await db.from('users').select('xp, level').eq('id', user.id).single();
         if (currentUser) {
             const newXp = currentUser.xp + 10;
             // Simple level curve: Level = floor(XP / 100) + 1
             const newLevel = Math.floor(newXp / 100) + 1;
-            await supabase.from('users').update({ xp: newXp, level: newLevel }).eq('id', user.id);
+            await db.from('users').update({ xp: newXp, level: newLevel }).eq('id', user.id);
         }
 
       })

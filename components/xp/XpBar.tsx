@@ -1,4 +1,4 @@
-import { UserProfile } from '@/hooks/useXP';
+import { User as UserProfile } from '@/lib/types';
 
 export function XpBar({ profile }: { profile: UserProfile | null }) {
   if (!profile) return null;

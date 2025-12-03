@@ -178,10 +178,11 @@ export async function getLeaderboard(limit: number = 10): Promise<{
       total: number;
     }>();
 
-    positions.forEach((p: { user_id: string; size: string; leverage: number; realized_pnl: string | null; status: string; users: { username: string } }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    positions.forEach((p: any) => {
       const existing = userStats.get(p.user_id) || {
         userId: p.user_id,
-        username: p.users?.username || 'Anonymous',
+        username: Array.isArray(p.users) ? p.users[0]?.username : p.users?.username || 'Anonymous',
         totalPnL: 0,
         totalVolume: 0,
         wins: 0,

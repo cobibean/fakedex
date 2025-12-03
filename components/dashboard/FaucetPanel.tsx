@@ -34,27 +34,30 @@ export function FaucetPanel() {
   const [tradingBalance, setTradingBalance] = useState<number>(0);
 
   // Read on-chain data from ESCROW if deployed, otherwise fallback to token
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: canClaimEscrow, refetch: refetchCanClaimEscrow } = useReadContract(
     escrowContract ? {
       contract: escrowContract,
       method: "canClaim",
       params: address ? [address] : undefined,
-    } : { contract: tfakeusdContract, method: "canMint", params: address ? [address] : undefined }
+    } : { contract: tfakeusdContract, method: "canMint", params: address ? [address] : undefined } as any
   );
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: timeUntilClaimEscrow, refetch: refetchTimeEscrow } = useReadContract(
     escrowContract ? {
       contract: escrowContract,
       method: "timeUntilNextClaim", 
       params: address ? [address] : undefined,
-    } : { contract: tfakeusdContract, method: "timeUntilNextMint", params: address ? [address] : undefined }
+    } : { contract: tfakeusdContract, method: "timeUntilNextMint", params: address ? [address] : undefined } as any
   );
 
   // Wallet balance (on-chain tokens)
   const { data: walletBalance, refetch: refetchWalletBalance } = useReadContract({
     contract: tfakeusdContract,
     method: "balanceOf",
-    params: address ? [address] : undefined,
+    params: [address ?? "0x0000000000000000000000000000000000000000"],
+    queryOptions: { enabled: !!address },
   });
 
   // Fetch trading balance from Supabase
@@ -95,15 +98,17 @@ export function FaucetPanel() {
 
   // Calculate next claim time
   const getNextClaimTime = () => {
-    if (!timeUntilClaimEscrow || timeUntilClaimEscrow === 0n) return null;
-    const seconds = Number(timeUntilClaimEscrow);
+    if (!timeUntilClaimEscrow) return null;
+    const timeValue = timeUntilClaimEscrow as unknown as bigint;
+    if (timeValue === 0n) return null;
+    const seconds = Number(timeValue);
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     if (hours > 0) return `${hours}h ${minutes}m`;
     return `${minutes}m`;
   };
 
-  const canClaim = canClaimEscrow === true;
+  const canClaim = (canClaimEscrow as unknown as boolean) === true;
 
   const handleClaim = async () => {
     if (!address || !canClaim) return;

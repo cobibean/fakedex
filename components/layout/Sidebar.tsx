@@ -45,23 +45,27 @@ export function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   const [tradingBalance, setTradingBalance] = useState<number>(0);
 
   // Read on-chain data for faucet - use escrow if deployed
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: canClaimData, refetch: refetchCanClaim } = useReadContract(
     escrowContract ? {
       contract: escrowContract,
       method: "canClaim",
-      params: address ? [address] : undefined,
+      params: [address ?? "0x0000000000000000000000000000000000000000"],
+      queryOptions: { enabled: !!address },
     } : {
       contract: tfakeusdContract,
       method: "canMint",
-      params: address ? [address] : undefined,
-    }
+      params: [address ?? "0x0000000000000000000000000000000000000000"],
+      queryOptions: { enabled: !!address },
+    } as any
   );
 
   // Wallet balance (on-chain tokens)
   const { data: walletBalance, refetch: refetchWalletBalance } = useReadContract({
     contract: tfakeusdContract,
     method: "balanceOf",
-    params: address ? [address] : undefined,
+    params: [address ?? "0x0000000000000000000000000000000000000000"],
+    queryOptions: { enabled: !!address },
   });
 
   const { mutateAsync: sendTransaction, isPending: isTxPending } = useSendTransaction();
@@ -94,7 +98,8 @@ export function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     const interval = setInterval(fetchTradingBalance, 5000);
     
     // Subscribe to realtime balance updates for instant feedback
-    let subscription: ReturnType<typeof supabase.channel> | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let subscription: any = null;
     
     const setupRealtimeSubscription = async () => {
       if (!address || !isSupabaseConfigured || !supabase) return;
@@ -132,7 +137,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     };
   }, [address]);
 
-  const canClaim = canClaimData === true;
+  const canClaim = (canClaimData as unknown as boolean) === true;
   const formattedWalletBalance = walletBalance ? (Number(walletBalance) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '0';
   const formattedTradingBalance = tradingBalance.toLocaleString(undefined, { maximumFractionDigits: 0 });
 

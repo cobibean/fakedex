@@ -1,4 +1,4 @@
-import { Achievement } from '@/hooks/useXP';
+import { Achievement } from '@/lib/types';
 import { Lock, Award } from 'lucide-react';
 import { clsx } from 'clsx';
 

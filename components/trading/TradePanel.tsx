@@ -30,10 +30,13 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
     useEffect(() => {
         if (!account?.address || !isSupabaseConfigured || !supabase) return;
 
-        let subscription: ReturnType<typeof supabase.channel> | null = null;
+        // Store reference to avoid null checks
+        const db = supabase;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let subscription: any = null;
 
         const fetchUserData = async () => {
-            const { data: user } = await supabase
+            const { data: user } = await db
                 .from('users')
                 .select('id')
                 .eq('wallet_address', account.address)
@@ -43,7 +46,7 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                 setUserId(user.id);
                 
                 // Fetch balance - use maybeSingle() to handle no rows gracefully
-                const { data: balanceData } = await supabase
+                const { data: balanceData } = await db
                     .from('user_balances')
                     .select('amount')
                     .eq('user_id', user.id)
@@ -53,7 +56,7 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                 setBalance(Number(balanceData?.amount || 0));
                 
                 // Subscribe to balance changes for real-time updates
-                subscription = supabase
+                subscription = db
                     .channel(`trade-balance-${user.id}`)
                     .on('postgres_changes', {
                         event: '*',
@@ -102,6 +105,9 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
         );
     }
 
+    // Store reference to avoid null checks in async functions
+    const db = supabase;
+
     const handleTrade = async () => {
         if (!userId) {
             alert("User not found. Try refreshing the page.");
@@ -137,7 +143,7 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
 
             // Deduct margin from balance
             const newBalance = balance - amountNum;
-            await supabase
+            await db
                 .from('user_balances')
                 .upsert({
                     user_id: userId,

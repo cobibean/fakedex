@@ -42,51 +42,71 @@ export default function AdminPage() {
   const [chaosSlider, setChaosSlider] = useState<number>(50);
   const [chaosUpdating, setChaosUpdating] = useState(false);
 
-  // Read current contract state
-  const { data: currentMaxPerTx } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  // Create a placeholder contract for disabled queries
+  const placeholderContract = getContract({
+    client,
+    chain: sepoliaChain,
+    address: "0x0000000000000000000000000000000000000000",
+    abi: ESCROW_ABI,
+  });
+  
+  const activeContract = escrowContract ?? placeholderContract;
+  const queryEnabled = !!escrowContract;
+
+  // Read current contract state - only run queries when contract exists
+  const { data: currentMaxPerTx } = useReadContract({
+    contract: activeContract,
     method: "maxWithdrawalPerTx",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: currentDailyLimit } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: currentDailyLimit } = useReadContract({
+    contract: activeContract,
     method: "dailyWithdrawalLimit",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: currentFaucetAmount } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: currentFaucetAmount } = useReadContract({
+    contract: activeContract,
     method: "faucetAmount",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: currentFaucetCooldown } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: currentFaucetCooldown } = useReadContract({
+    contract: activeContract,
     method: "faucetCooldown",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: currentBackendSigner } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: currentBackendSigner } = useReadContract({
+    contract: activeContract,
     method: "backendSigner",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: escrowBalance } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: escrowBalance } = useReadContract({
+    contract: activeContract,
     method: "escrowBalance",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: totalDeposited } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: totalDeposited } = useReadContract({
+    contract: activeContract,
     method: "totalDeposited",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: totalWithdrawn } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: totalWithdrawn } = useReadContract({
+    contract: activeContract,
     method: "totalWithdrawn",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
-  const { data: totalFaucetClaims } = useReadContract(escrowContract ? {
-    contract: escrowContract,
+  const { data: totalFaucetClaims } = useReadContract({
+    contract: activeContract,
     method: "totalFaucetClaims",
-  } : undefined);
+    queryOptions: { enabled: queryEnabled },
+  });
 
   const { mutateAsync: sendTransaction } = useSendTransaction();
 
@@ -152,7 +172,7 @@ export default function AdminPage() {
   // Transaction handler
   const handleTransaction = async (
     action: string,
-    method: string,
+    method: "setWithdrawalLimits" | "setFaucetSettings" | "setBackendSigner" | "emergencyWithdraw",
     params: unknown[]
   ) => {
     if (!escrowContract) return;
@@ -162,11 +182,12 @@ export default function AdminPage() {
     setSuccess(null);
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transaction = prepareContractCall({
         contract: escrowContract,
         method,
-        params: params as [],
-      });
+        params,
+      } as any);
 
       await sendTransaction(transaction);
       setSuccess(`${action} successful!`);

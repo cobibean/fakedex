@@ -38,16 +38,19 @@ export function WithdrawPanel() {
   const { data: walletBalance, refetch: refetchWalletBalance } = useReadContract({
     contract: tfakeusdContract,
     method: "balanceOf",
-    params: address ? [address] : undefined,
+    params: [address ?? "0x0000000000000000000000000000000000000000"],
+    queryOptions: { enabled: !!address },
   });
 
   // Current nonce for withdrawals
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: currentNonce, refetch: refetchNonce } = useReadContract(
     escrowContract ? {
       contract: escrowContract,
       method: "withdrawalNonces",
-      params: address ? [address] : undefined,
-    } : { contract: tfakeusdContract, method: "balanceOf", params: address ? [address] : undefined }
+      params: [address ?? "0x0000000000000000000000000000000000000000"],
+      queryOptions: { enabled: !!address },
+    } : { contract: tfakeusdContract, method: "balanceOf", params: [address ?? "0x0000000000000000000000000000000000000000"], queryOptions: { enabled: false } } as any
   );
 
   const { mutateAsync: sendTransaction, isPending: isTxPending } = useSendTransaction();
