@@ -81,6 +81,17 @@ create index idx_candles_symbol_time on public.candles (symbol, time desc);
 -- Add current_price column to pairs for live price tracking
 alter table public.pairs add column if not exists current_price numeric(38, 18);
 
+-- Enable Realtime for pairs table (required for live price updates in sidebar)
+alter publication supabase_realtime add table pairs;
+-- Also enable for candles and trades for live chart/order feed updates
+alter publication supabase_realtime add table candles;
+alter publication supabase_realtime add table trades;
+alter publication supabase_realtime add table user_balances;
+
+-- CRITICAL: Set REPLICA IDENTITY FULL for realtime UPDATE events
+-- Without this, non-primary-key columns (like current_price) won't broadcast in realtime
+alter table pairs replica identity full;
+
 -- SEED DATA: Pairs
 insert into public.pairs (symbol, name, description, initial_price) values
 ('SHIT', 'Sovereign Hedge Inflation Token', 'The gold standard of nothing.', 1.0),
