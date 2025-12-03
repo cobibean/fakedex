@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title tFAKEUSD
+ * @dev Test FakeUSD token for the FakeDEX platform
+ * Features:
+ * - Public mint with 24-hour cooldown per address
+ * - Whitelisted addresses can mint unlimited
+ * - No supply cap (unlimited minting)
+ * - Default mint amount: 1000 tokens
+ */
+contract tFAKEUSD is ERC20, Ownable {
+    // Cooldown period: 24 hours in seconds
+    uint256 public constant COOLDOWN_PERIOD = 24 hours;
+    
+    // Default mint amount: 1000 tokens (with 18 decimals)
+    uint256 public constant DEFAULT_MINT_AMOUNT = 1000 * 10**18;
+    
+    // Mapping to track last mint time per address
+    mapping(address => uint256) public lastMintTime;
+    
+    // Mapping for whitelisted addresses (can mint unlimited)
+    mapping(address => bool) public whitelisted;
+    
+    // Events
+    event Minted(address indexed to, uint256 amount);
+    event WhitelistUpdated(address indexed account, bool status);
+    
+    constructor() ERC20("Test FakeUSD", "tFAKEUSD") Ownable(msg.sender) {
+        // Whitelist the deployer
+        whitelisted[msg.sender] = true;
+        
+        // Whitelist the additional address specified
+        whitelisted[0x033C4BE38e0265ab17E12f50BEc914e0a56f269f] = true;
+        
+        emit WhitelistUpdated(msg.sender, true);
+        emit WhitelistUpdated(0x033C4BE38e0265ab17E12f50BEc914e0a56f269f, true);
+    }
+    
+    /**
+     * @dev Public mint function with rate limiting
+     * @param to Address to mint tokens to
+     * @param amount Amount of tokens to mint (in wei, 18 decimals)
+     */
+    function mint(address to, uint256 amount) external {
+        require(to != address(0), "Cannot mint to zero address");
+        
+        // Check if caller is whitelisted (unlimited minting)
+        if (!whitelisted[msg.sender]) {
+            // Check cooldown for non-whitelisted addresses
+            require(
+                block.timestamp >= lastMintTime[msg.sender] + COOLDOWN_PERIOD,
+                "Must wait 24 hours between mints"
+            );
+            
+            // Update last mint time
+            lastMintTime[msg.sender] = block.timestamp;
+        }
+        
+        _mint(to, amount);
+        emit Minted(to, amount);
+    }
+    
+    /**
+     * @dev Convenience function to mint default amount (1000 tokens) to caller
+     */
+    function claim() external {
+        require(msg.sender != address(0), "Cannot mint to zero address");
+        
+        // Check if caller is whitelisted (unlimited minting)
+        if (!whitelisted[msg.sender]) {
+            // Check cooldown for non-whitelisted addresses
+            require(
+                block.timestamp >= lastMintTime[msg.sender] + COOLDOWN_PERIOD,
+                "Must wait 24 hours between claims"
+            );
+            
+            // Update last mint time
+            lastMintTime[msg.sender] = block.timestamp;
+        }
+        
+        _mint(msg.sender, DEFAULT_MINT_AMOUNT);
+        emit Minted(msg.sender, DEFAULT_MINT_AMOUNT);
+    }
+    
+    /**
+     * @dev Check if an address can mint (not on cooldown or whitelisted)
+     * @param account Address to check
+     * @return bool Whether the address can mint
+     */
+    function canMint(address account) external view returns (bool) {
+        if (whitelisted[account]) {
+            return true;
+        }
+        return block.timestamp >= lastMintTime[account] + COOLDOWN_PERIOD;
+    }
+    
+    /**
+     * @dev Get time remaining until an address can mint again
+     * @param account Address to check
+     * @return uint256 Seconds remaining (0 if can mint now)
+     */
+    function timeUntilNextMint(address account) external view returns (uint256) {
+        if (whitelisted[account]) {
+            return 0;
+        }
+        
+        uint256 nextMintTime = lastMintTime[account] + COOLDOWN_PERIOD;
+        if (block.timestamp >= nextMintTime) {
+            return 0;
+        }
+        return nextMintTime - block.timestamp;
+    }
+    
+    /**
+     * @dev Add or remove an address from the whitelist (owner only)
+     * @param account Address to update
+     * @param status True to whitelist, false to remove
+     */
+    function setWhitelist(address account, bool status) external onlyOwner {
+        whitelisted[account] = status;
+        emit WhitelistUpdated(account, status);
+    }
+    
+    /**
+     * @dev Batch update whitelist (owner only)
+     * @param accounts Array of addresses to update
+     * @param status True to whitelist, false to remove
+     */
+    function setWhitelistBatch(address[] calldata accounts, bool status) external onlyOwner {
+        for (uint256 i = 0; i < accounts.length; i++) {
+            whitelisted[accounts[i]] = status;
+            emit WhitelistUpdated(accounts[i], status);
+        }
+    }
+}
+

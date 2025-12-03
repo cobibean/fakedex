@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ConnectButton } from "thirdweb/react";
-import { client } from "@/lib/thirdwebClient";
+import { client, sepoliaChain } from "@/lib/thirdwebClient";
 import { Menu, User } from 'lucide-react';
 
 export function Header({ toggleSidebar }: { toggleSidebar?: () => void }) {
@@ -39,7 +39,7 @@ export function Header({ toggleSidebar }: { toggleSidebar?: () => void }) {
           Profile
         </Link>
         
-        <ConnectButton client={client} theme="dark" />
+        <ConnectButton client={client} chain={sepoliaChain} theme="dark" />
       </div>
     </header>
   );
