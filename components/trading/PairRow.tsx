@@ -1,18 +1,25 @@
 import { Pair } from '@/lib/types';
 import { clsx } from 'clsx';
-import { ArrowUp, ArrowDown } from 'lucide-react';
-import { hashString } from '@/lib/utils';
+import { ArrowUp, ArrowDown, Minus } from 'lucide-react';
 
 interface PairRowProps {
   pair: Pair;
+  currentPrice?: number;
   isSelected?: boolean;
   onClick?: () => void;
 }
 
-export function PairRow({ pair, isSelected, onClick }: PairRowProps) {
-  const hash = hashString(pair.symbol);
-  const isGreen = hash % 2 === 0;
-  const change = ((hash % 2000) / 100).toFixed(2);
+export function PairRow({ pair, currentPrice, isSelected, onClick }: PairRowProps) {
+  // Use current price if available, otherwise fall back to initial
+  const displayPrice = currentPrice || pair.initial_price;
+  
+  // Calculate actual % change from initial price
+  const changePercent = pair.initial_price > 0 
+    ? ((displayPrice - pair.initial_price) / pair.initial_price) * 100 
+    : 0;
+  
+  const isGreen = changePercent >= 0;
+  const isFlat = Math.abs(changePercent) < 0.01;
 
   return (
     <div 
@@ -28,10 +35,19 @@ export function PairRow({ pair, isSelected, onClick }: PairRowProps) {
       </div>
       
       <div className="text-right">
-        <div className="font-mono text-sm text-gray-300">${pair.initial_price.toLocaleString()}</div>
-        <div className={clsx("text-xs font-mono flex items-center justify-end gap-1", isGreen ? "text-green-500" : "text-red-500")}>
-          {isGreen ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-          {change}%
+        <div className="font-mono text-sm text-gray-300">${displayPrice.toFixed(5)}</div>
+        <div className={clsx(
+          "text-xs font-mono flex items-center justify-end gap-1", 
+          isFlat ? "text-gray-500" : isGreen ? "text-green-500" : "text-red-500"
+        )}>
+          {isFlat ? (
+            <Minus className="w-3 h-3" />
+          ) : isGreen ? (
+            <ArrowUp className="w-3 h-3" />
+          ) : (
+            <ArrowDown className="w-3 h-3" />
+          )}
+          {isGreen && changePercent > 0 ? '+' : ''}{changePercent.toFixed(2)}%
         </div>
       </div>
     </div>

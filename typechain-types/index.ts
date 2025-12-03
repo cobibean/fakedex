@@ -20,5 +20,17 @@ export type { IERC20Metadata } from "./@openzeppelin/contracts/token/ERC20/exten
 export { IERC20Metadata__factory } from "./factories/@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata__factory";
 export type { IERC20 } from "./@openzeppelin/contracts/token/ERC20/IERC20";
 export { IERC20__factory } from "./factories/@openzeppelin/contracts/token/ERC20/IERC20__factory";
+export type { ECDSA } from "./@openzeppelin/contracts/utils/cryptography/ECDSA";
+export { ECDSA__factory } from "./factories/@openzeppelin/contracts/utils/cryptography/ECDSA__factory";
+export type { SafeCast } from "./@openzeppelin/contracts/utils/math/SafeCast";
+export { SafeCast__factory } from "./factories/@openzeppelin/contracts/utils/math/SafeCast__factory";
+export type { ReentrancyGuard } from "./@openzeppelin/contracts/utils/ReentrancyGuard";
+export { ReentrancyGuard__factory } from "./factories/@openzeppelin/contracts/utils/ReentrancyGuard__factory";
+export type { Strings } from "./@openzeppelin/contracts/utils/Strings";
+export { Strings__factory } from "./factories/@openzeppelin/contracts/utils/Strings__factory";
+export type { FakeDexEscrow } from "./contracts/FakeDexEscrow.sol/FakeDexEscrow";
+export { FakeDexEscrow__factory } from "./factories/contracts/FakeDexEscrow.sol/FakeDexEscrow__factory";
+export type { IMintableToken } from "./contracts/FakeDexEscrow.sol/IMintableToken";
+export { IMintableToken__factory } from "./factories/contracts/FakeDexEscrow.sol/IMintableToken__factory";
 export type { TFAKEUSD } from "./contracts/TFAKEUSD";
 export { TFAKEUSD__factory } from "./factories/contracts/TFAKEUSD__factory";

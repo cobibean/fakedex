@@ -74,7 +74,7 @@ export function TradeHistory({ trades, showUser = false }: TradeHistoryProps) {
                     )}
                   </div>
                   <div className="text-sm text-gray-500 font-mono">
-                    @ ${trade.price.toFixed(4)}
+                    @ ${trade.price.toFixed(5)}
                   </div>
                 </div>
               </div>

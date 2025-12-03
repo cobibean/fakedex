@@ -2,6 +2,7 @@
 
 import { Pair } from '@/lib/types';
 import { PairRow } from './PairRow';
+import { useAllPrices } from '@/hooks/useChaosEngine';
 
 interface PairListProps {
   pairs: Pair[];
@@ -10,6 +11,8 @@ interface PairListProps {
 }
 
 export function PairList({ pairs, selectedSymbol, onSelectPair }: PairListProps) {
+  const { prices } = useAllPrices();
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-gray-800 bg-black/20 backdrop-blur">
@@ -19,7 +22,8 @@ export function PairList({ pairs, selectedSymbol, onSelectPair }: PairListProps)
         {pairs.map((pair) => (
           <PairRow 
             key={pair.symbol} 
-            pair={pair} 
+            pair={pair}
+            currentPrice={prices[pair.symbol]}
             isSelected={pair.symbol === selectedSymbol}
             onClick={() => onSelectPair(pair.symbol)}
           />

@@ -18,7 +18,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         <Header toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         
-        <main className="flex-1 overflow-auto p-4 md:p-6 relative">
+        <main className="flex-1 overflow-auto p-2 md:p-3 relative">
            {children}
         </main>
       </div>

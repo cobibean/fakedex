@@ -38,7 +38,7 @@ export function DepthPanel({ symbol, price }: DepthPanelProps) {
         <div className="p-3 space-y-1">
           {bids.map((row, idx) => (
             <div key={`bid-${idx}`} className="flex justify-between text-xs font-mono">
-              <span className="text-green-400">${row.price.toFixed(4)}</span>
+              <span className="text-green-400">${row.price.toFixed(5)}</span>
               <span className="text-gray-400">{row.size.toLocaleString()} FAKEUSD</span>
             </div>
           ))}
@@ -47,7 +47,7 @@ export function DepthPanel({ symbol, price }: DepthPanelProps) {
           {asks.map((row, idx) => (
             <div key={`ask-${idx}`} className="flex justify-between text-xs font-mono">
               <span className="text-gray-400">{row.size.toLocaleString()} FAKEUSD</span>
-              <span className="text-red-400">${row.price.toFixed(4)}</span>
+              <span className="text-red-400">${row.price.toFixed(5)}</span>
             </div>
           ))}
         </div>

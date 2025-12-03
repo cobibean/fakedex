@@ -5,16 +5,24 @@ import { useActiveAccount, useSendTransaction, useReadContract } from "thirdweb/
 import { getContract, prepareContractCall } from "thirdweb";
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { client, sepoliaChain } from '@/lib/thirdwebClient';
-import { TFAKEUSD_ADDRESS, TFAKEUSD_ABI } from '@/lib/contracts';
-import { Droplets, Loader2, CheckCircle, ExternalLink, AlertCircle } from 'lucide-react';
+import { TFAKEUSD_ADDRESS, TFAKEUSD_ABI, ESCROW_ADDRESS, ESCROW_ABI } from '@/lib/contracts';
+import { Droplets, Loader2, CheckCircle, ExternalLink, AlertCircle, Wallet, TrendingUp } from 'lucide-react';
 
-// Get the tFAKEUSD contract instance
+// Get contract instances
 const tfakeusdContract = getContract({
   client,
   chain: sepoliaChain,
   address: TFAKEUSD_ADDRESS,
   abi: TFAKEUSD_ABI,
 });
+
+// Escrow contract (if deployed)
+const escrowContract = ESCROW_ADDRESS ? getContract({
+  client,
+  chain: sepoliaChain,
+  address: ESCROW_ADDRESS,
+  abi: ESCROW_ABI,
+}) : null;
 
 export function FaucetPanel() {
   const account = useActiveAccount();
@@ -23,45 +31,79 @@ export function FaucetPanel() {
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tradingBalance, setTradingBalance] = useState<number>(0);
 
-  // Read on-chain data
-  const { data: canMintOnChain, refetch: refetchCanMint } = useReadContract({
-    contract: tfakeusdContract,
-    method: "canMint",
-    params: address ? [address] : undefined,
-  });
+  // Read on-chain data from ESCROW if deployed, otherwise fallback to token
+  const { data: canClaimEscrow, refetch: refetchCanClaimEscrow } = useReadContract(
+    escrowContract ? {
+      contract: escrowContract,
+      method: "canClaim",
+      params: address ? [address] : undefined,
+    } : { contract: tfakeusdContract, method: "canMint", params: address ? [address] : undefined }
+  );
 
-  const { data: timeUntilMint, refetch: refetchTime } = useReadContract({
-    contract: tfakeusdContract,
-    method: "timeUntilNextMint", 
-    params: address ? [address] : undefined,
-  });
+  const { data: timeUntilClaimEscrow, refetch: refetchTimeEscrow } = useReadContract(
+    escrowContract ? {
+      contract: escrowContract,
+      method: "timeUntilNextClaim", 
+      params: address ? [address] : undefined,
+    } : { contract: tfakeusdContract, method: "timeUntilNextMint", params: address ? [address] : undefined }
+  );
 
-  const { data: balance, refetch: refetchBalance } = useReadContract({
+  // Wallet balance (on-chain tokens)
+  const { data: walletBalance, refetch: refetchWalletBalance } = useReadContract({
     contract: tfakeusdContract,
     method: "balanceOf",
     params: address ? [address] : undefined,
   });
 
+  // Fetch trading balance from Supabase
+  const fetchTradingBalance = async () => {
+    if (!address || !isSupabaseConfigured || !supabase) return;
+    
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('wallet_address', address)
+      .single();
+    
+    if (user) {
+      const { data: balance } = await supabase
+        .from('user_balances')
+        .select('amount')
+        .eq('user_id', user.id)
+        .eq('symbol', 'FAKEUSD')
+        .maybeSingle();
+      
+      setTradingBalance(Number(balance?.amount || 0));
+    }
+  };
+
+  useEffect(() => {
+    fetchTradingBalance();
+  }, [address]);
+
   // Transaction hook
   const { mutateAsync: sendTransaction, isPending: isTxPending } = useSendTransaction();
 
-  // Format balance for display
-  const formattedBalance = balance 
-    ? (Number(balance) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 2 })
+  // Format balances for display
+  const formattedWalletBalance = walletBalance 
+    ? (Number(walletBalance) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 2 })
     : '0';
+  
+  const formattedTradingBalance = tradingBalance.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   // Calculate next claim time
   const getNextClaimTime = () => {
-    if (!timeUntilMint || timeUntilMint === 0n) return null;
-    const seconds = Number(timeUntilMint);
+    if (!timeUntilClaimEscrow || timeUntilClaimEscrow === 0n) return null;
+    const seconds = Number(timeUntilClaimEscrow);
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     if (hours > 0) return `${hours}h ${minutes}m`;
     return `${minutes}m`;
   };
 
-  const canClaim = canMintOnChain === true;
+  const canClaim = canClaimEscrow === true;
 
   const handleClaim = async () => {
     if (!address || !canClaim) return;
@@ -71,19 +113,29 @@ export function FaucetPanel() {
     setTxHash(null);
 
     try {
-      // Prepare the claim transaction
-      const transaction = prepareContractCall({
-        contract: tfakeusdContract,
-        method: "claim",
-        params: [],
-      });
+      let transaction;
+      
+      if (escrowContract) {
+        // Use escrow's claimToTrading() - tokens go directly to trading account
+        transaction = prepareContractCall({
+          contract: escrowContract,
+          method: "claimToTrading",
+          params: [],
+        });
+      } else {
+        // Fallback to token's claim() if escrow not deployed
+        transaction = prepareContractCall({
+          contract: tfakeusdContract,
+          method: "claim",
+          params: [],
+        });
+      }
 
       // Send the transaction
       const result = await sendTransaction(transaction);
-      
       setTxHash(result.transactionHash);
 
-      // Update Supabase tracking (for additional off-chain tracking)
+      // Update Supabase trading balance
       if (isSupabaseConfigured && supabase) {
         const { data: user } = await supabase
           .from('users')
@@ -98,13 +150,13 @@ export function FaucetPanel() {
             .update({ last_faucet_claim_at: new Date().toISOString() })
             .eq('id', user.id);
 
-          // Update balance in Supabase (for off-chain trading)
+          // Update trading balance in Supabase
           const { data: currentBalance } = await supabase
             .from('user_balances')
             .select('amount')
             .eq('user_id', user.id)
             .eq('symbol', 'FAKEUSD')
-            .single();
+            .maybeSingle();
           
           const newAmount = (Number(currentBalance?.amount || 0) + 1000);
           
@@ -114,15 +166,17 @@ export function FaucetPanel() {
               user_id: user.id, 
               symbol: 'FAKEUSD', 
               amount: newAmount 
-            }, { onConflict: 'user_id, symbol' });
+            }, { onConflict: 'user_id,symbol' });
+          
+          setTradingBalance(newAmount);
         }
       }
 
       // Refetch on-chain data
       setTimeout(() => {
-        refetchCanMint();
-        refetchTime();
-        refetchBalance();
+        refetchCanClaimEscrow();
+        refetchTimeEscrow();
+        refetchWalletBalance();
       }, 2000);
 
     } catch (err: unknown) {
@@ -141,13 +195,14 @@ export function FaucetPanel() {
     if (!address) return;
     
     const interval = setInterval(() => {
-      refetchCanMint();
-      refetchTime();
-      refetchBalance();
+      refetchCanClaimEscrow();
+      refetchTimeEscrow();
+      refetchWalletBalance();
+      fetchTradingBalance();
     }, 30000); // Refresh every 30 seconds
     
     return () => clearInterval(interval);
-  }, [address, refetchCanMint, refetchTime, refetchBalance]);
+  }, [address, refetchCanClaimEscrow, refetchTimeEscrow, refetchWalletBalance]);
 
   if (!address) {
     return (
@@ -195,17 +250,43 @@ export function FaucetPanel() {
           </button>
         </div>
 
-        {/* Balance Display */}
-        <div className="flex items-center justify-between text-xs border-t border-gray-800 pt-3">
-          <span className="text-gray-500">Your tFAKEUSD Balance:</span>
-          <span className="font-mono text-green-400 font-bold">{formattedBalance}</span>
+        {/* Balances Display */}
+        <div className="grid grid-cols-2 gap-3 border-t border-gray-800 pt-3">
+          {/* Trading Balance */}
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-green-500" />
+            <div>
+              <div className="text-[10px] text-gray-500 uppercase">Trading Balance</div>
+              <div className="font-mono text-green-400 font-bold">{formattedTradingBalance}</div>
+            </div>
+          </div>
+          
+          {/* Wallet Balance */}
+          <div className="flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-blue-400" />
+            <div>
+              <div className="text-[10px] text-gray-500 uppercase">Wallet Balance</div>
+              <div className="font-mono text-blue-400 font-bold">{formattedWalletBalance}</div>
+            </div>
+          </div>
         </div>
+
+        {/* Escrow Status */}
+        {ESCROW_ADDRESS ? (
+          <div className="text-[10px] text-green-600 bg-green-900/20 px-2 py-1 rounded text-center">
+            ✓ Claims go directly to Trading Account
+          </div>
+        ) : (
+          <div className="text-[10px] text-yellow-600 bg-yellow-900/20 px-2 py-1 rounded text-center">
+            ⚠ Escrow not deployed - claims go to wallet
+          </div>
+        )}
 
         {/* Success Message */}
         {txHash && (
           <div className="flex items-center gap-2 text-xs bg-green-900/20 text-green-400 p-2 rounded border border-green-500/20">
             <CheckCircle className="w-4 h-4" />
-            <span>Claimed 1,000 tFAKEUSD!</span>
+            <span>Claimed 1,000 tFAKEUSD to Trading!</span>
             <a 
               href={`https://sepolia.etherscan.io/tx/${txHash}`}
               target="_blank"

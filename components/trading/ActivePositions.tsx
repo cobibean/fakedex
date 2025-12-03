@@ -18,6 +18,7 @@ import { formatDistanceToNow } from '@/lib/utils';
 
 interface ActivePositionsProps {
   onPositionClosed?: () => void;
+  inline?: boolean; // Compact mode for embedding in other panels
 }
 
 function PositionRow({ 
@@ -65,7 +66,7 @@ function PositionRow({
                 </span>
               </div>
               <div className="text-xs text-gray-500 font-mono">
-                Size: ${position.size.toLocaleString()}
+                Size: ${position.size_fakeusd.toLocaleString()}
               </div>
             </div>
           </div>
@@ -120,17 +121,17 @@ function PositionRow({
           <div className="grid grid-cols-2 gap-4 text-xs">
             <div>
               <span className="text-gray-500">Entry Price</span>
-              <div className="font-mono text-white">${position.entry_price.toFixed(4)}</div>
+              <div className="font-mono text-white">${position.entry_price.toFixed(5)}</div>
             </div>
             <div>
               <span className="text-gray-500">Current Price</span>
-              <div className="font-mono text-white">${position.currentPrice.toFixed(4)}</div>
+              <div className="font-mono text-white">${position.currentPrice.toFixed(5)}</div>
             </div>
             <div>
               <span className="text-gray-500 flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 text-orange-400" /> Liq. Price
               </span>
-              <div className="font-mono text-orange-400">${position.liquidation_price.toFixed(4)}</div>
+              <div className="font-mono text-orange-400">${position.liquidation_price.toFixed(5)}</div>
             </div>
             <div>
               <span className="text-gray-500">Opened</span>
@@ -141,7 +142,7 @@ function PositionRow({
                 <span className="text-gray-500 flex items-center gap-1">
                   <Target className="w-3 h-3 text-red-400" /> Stop Loss
                 </span>
-                <div className="font-mono text-red-400">${position.stop_loss.toFixed(4)}</div>
+                <div className="font-mono text-red-400">${position.stop_loss.toFixed(5)}</div>
               </div>
             )}
             {position.take_profit && (
@@ -149,7 +150,7 @@ function PositionRow({
                 <span className="text-gray-500 flex items-center gap-1">
                   <Target className="w-3 h-3 text-green-400" /> Take Profit
                 </span>
-                <div className="font-mono text-green-400">${position.take_profit.toFixed(4)}</div>
+                <div className="font-mono text-green-400">${position.take_profit.toFixed(5)}</div>
               </div>
             )}
           </div>
@@ -159,7 +160,7 @@ function PositionRow({
   );
 }
 
-export function ActivePositions({ onPositionClosed }: ActivePositionsProps) {
+export function ActivePositions({ onPositionClosed, inline = false }: ActivePositionsProps) {
   const { positions, loading, totalUnrealizedPnL, closePosition } = usePositions();
   const [closingId, setClosingId] = useState<string | null>(null);
 
@@ -175,6 +176,39 @@ export function ActivePositions({ onPositionClosed }: ActivePositionsProps) {
     }
   };
 
+  // Inline mode - compact, no wrapper
+  if (inline) {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="w-5 h-5 text-purple-500 animate-spin" />
+        </div>
+      );
+    }
+
+    if (positions.length === 0) {
+      return (
+        <div className="flex items-center justify-center py-4 text-gray-500 text-sm">
+          <span className="mr-2">📊</span> No open positions
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-1.5 overflow-y-auto h-full">
+        {positions.map((position) => (
+          <InlinePositionRow
+            key={position.id}
+            position={position}
+            onClose={handleClose}
+            isClosing={closingId === position.id}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Full mode - with header and wrapper
   if (loading) {
     return (
       <div className="glass-panel rounded-xl p-4 border border-gray-800">
@@ -229,6 +263,68 @@ export function ActivePositions({ onPositionClosed }: ActivePositionsProps) {
             />
           ))
         )}
+      </div>
+    </div>
+  );
+}
+
+// Compact inline position row for the bottom panel
+function InlinePositionRow({ 
+  position, 
+  onClose,
+  isClosing 
+}: { 
+  position: PositionWithPnL; 
+  onClose: (id: string, price: number) => void;
+  isClosing: boolean;
+}) {
+  const isLong = position.side === 'long';
+  const isProfitable = position.unrealizedPnL >= 0;
+
+  return (
+    <div className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
+      position.isLiquidatable 
+        ? 'bg-red-500/20 border border-red-500/50' 
+        : 'bg-gray-800/50 hover:bg-gray-800'
+    }`}>
+      {/* Left: Symbol & Direction */}
+      <div className="flex items-center gap-2">
+        {isLong ? (
+          <TrendingUp className="w-3 h-3 text-green-500" />
+        ) : (
+          <TrendingDown className="w-3 h-3 text-red-500" />
+        )}
+        <span className="font-bold text-white">{position.symbol}</span>
+        <span className={`font-mono text-[10px] ${isLong ? 'text-green-400' : 'text-red-400'}`}>
+          {isLong ? 'L' : 'S'}
+        </span>
+        <span className="text-[10px] text-purple-400 font-mono">{position.leverage}x</span>
+      </div>
+
+      {/* Center: Size */}
+      <div className="text-gray-400 font-mono">
+        ${position.size_fakeusd.toLocaleString()}
+      </div>
+
+      {/* Right: PnL & Close */}
+      <div className="flex items-center gap-3">
+        <div className={`font-mono font-bold ${isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+          {isProfitable ? '+' : ''}{position.unrealizedPnL.toFixed(2)}
+          <span className="text-[10px] ml-1 opacity-70">
+            ({isProfitable ? '+' : ''}{position.pnlPercent.toFixed(1)}%)
+          </span>
+        </div>
+        <button
+          onClick={() => onClose(position.id, position.currentPrice)}
+          disabled={isClosing}
+          className="p-1 hover:bg-red-600 rounded transition-colors disabled:opacity-50"
+        >
+          {isClosing ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <X className="w-3 h-3 text-gray-400 hover:text-white" />
+          )}
+        </button>
       </div>
     </div>
   );

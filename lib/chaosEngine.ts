@@ -16,15 +16,17 @@ export function generateNextCandle(
   // Chaos factor: 0.0 = calm, 1.0 = absolute mayhem
   const chaosFactor = Math.max(0, Math.min(100, chaosLevel)) / 100;
 
-  // Volatility base: 1% at 0 chaos, up to 20% at 100 chaos
-  const volatility = 0.01 + (chaosFactor * 0.19);
+  // Volatility base: MUCH MORE REASONABLE VALUES
+  // At chaos 0: 0.05% per candle (very stable, like a stablecoin)
+  // At chaos 100: 2% per candle (volatile meme territory)
+  // This means at chaos 50, you get ~1% volatility - survivable with leverage
+  const volatility = 0.0005 + (chaosFactor * 0.0195);
   
-  // Directional bias: "Up Only" narrative
-  // At 0 chaos, strong up trend. At 100 chaos, wild but slightly less predictable trend.
-  // Bias is a small percentage added to the random walk.
-  const upBias = 0.001 + (0.005 * (1 - chaosFactor)); 
+  // Directional bias: "Up Only" narrative (slight bullish tendency)
+  // At 0 chaos, moderate up trend. At 100 chaos, more random.
+  const upBias = 0.0001 + (0.0003 * (1 - chaosFactor)); 
 
-  // Random walk component (Gaussian-ish approximation)
+  // Random walk component (Gaussian-ish approximation using Box-Muller)
   const u1 = Math.random();
   const u2 = Math.random();
   const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
@@ -33,8 +35,10 @@ export function generateNextCandle(
   const newClose = previousClose * (1 + changePercent);
   
   // Determine High/Low based on volatility noise
-  // Wicks get longer with more chaos
-  const wickVolatility = volatility * (1 + chaosFactor * 2);
+  // Wicks are slightly longer than body but not crazy
+  // Max wick multiplier: 1.5x at chaos 0, 3x at chaos 100
+  const wickMultiplier = 1.5 + (chaosFactor * 1.5);
+  const wickVolatility = volatility * wickMultiplier;
   const high = Math.max(previousClose, newClose) * (1 + Math.random() * wickVolatility);
   const low = Math.min(previousClose, newClose) * (1 - Math.random() * wickVolatility);
 

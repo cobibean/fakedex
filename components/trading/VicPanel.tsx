@@ -38,7 +38,7 @@ export function VicPanel({ chaosLevel, symbol = 'SHIT', isOverride, price }: Vic
           <p className="text-xs text-gray-400 leading-relaxed">{getLine(chaosLevel)}</p>
         </div>
         <div className="flex gap-3 text-[10px] font-mono uppercase tracking-wide text-gray-500">
-          <span>{symbol} ≈ ${Number(price ?? 0).toFixed(4)}</span>
+          <span>{symbol} ≈ ${Number(price ?? 0).toFixed(5)}</span>
           <span>Chaos {isOverride ? 'Override' : 'Global'}: {chaosLevel}%</span>
         </div>
       </div>

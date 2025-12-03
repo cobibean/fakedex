@@ -66,7 +66,7 @@ export function OrderFeed({ activeSymbol }: { activeSymbol?: string }) {
                  <span className="text-gray-400 font-bold">${trade.symbol}</span>
                </div>
                <div className="flex gap-3 text-gray-500">
-                 <span>${Number(trade.price).toFixed(4)}</span>
+                 <span>${Number(trade.price).toFixed(5)}</span>
                  <span className="w-16 text-right text-gray-600">{Number(trade.size_fakeusd).toLocaleString()}</span>
                </div>
             </div>

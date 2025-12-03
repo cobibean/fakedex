@@ -261,8 +261,8 @@ export default function ProfilePage() {
                         </span>
                       </div>
                       <div className="text-right">
-                        <div className="font-mono text-white">${Number(pos.size).toLocaleString()}</div>
-                        <div className="text-xs text-gray-500">@ ${Number(pos.entry_price).toFixed(4)}</div>
+                        <div className="font-mono text-white">${Number(pos.size_fakeusd).toLocaleString()}</div>
+                        <div className="text-xs text-gray-500">@ ${Number(pos.entry_price).toFixed(5)}</div>
                       </div>
                     </div>
                   </div>
@@ -309,7 +309,7 @@ export default function ProfilePage() {
                             {isProfitable ? '+' : ''}{Number(pos.realized_pnl).toFixed(2)}
                           </div>
                           <div className="text-xs text-gray-500">
-                            ${Number(pos.entry_price).toFixed(4)} → ${Number(pos.exit_price).toFixed(4)}
+                            ${Number(pos.entry_price).toFixed(5)} → ${Number(pos.exit_price).toFixed(5)}
                           </div>
                         </div>
                       </div>

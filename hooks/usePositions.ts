@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useActiveAccount } from 'thirdweb/react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { 
@@ -24,9 +24,10 @@ export interface PositionWithPnL extends Position {
 export function usePositions() {
   const account = useActiveAccount();
   const { prices } = useAllPrices();
-  const [positions, setPositions] = useState<PositionWithPnL[]>([]);
+  const [rawPositions, setRawPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const liquidatingRef = useRef<Set<string>>(new Set());
 
   // Get user ID from wallet address
   useEffect(() => {
@@ -51,10 +52,10 @@ export function usePositions() {
     fetchUserId();
   }, [account?.address]);
 
-  // Fetch positions and subscribe to updates
+  // Fetch positions and subscribe to updates (only depends on userId, not prices)
   useEffect(() => {
     if (!userId || !isSupabaseConfigured || !supabase) {
-      setPositions([]);
+      setRawPositions([]);
       setLoading(false);
       return;
     }
@@ -62,20 +63,7 @@ export function usePositions() {
     const fetchPositions = async () => {
       setLoading(true);
       const openPositions = await getUserOpenPositions(userId);
-      
-      // Enrich with PnL data
-      const enriched = openPositions.map(pos => {
-        const currentPrice = prices[pos.symbol] || pos.entry_price;
-        return {
-          ...pos,
-          unrealizedPnL: calculateUnrealizedPnL(pos, currentPrice),
-          pnlPercent: calculatePnLPercent(pos, currentPrice),
-          currentPrice,
-          isLiquidatable: shouldLiquidate(pos, currentPrice),
-        };
-      });
-      
-      setPositions(enriched);
+      setRawPositions(openPositions);
       setLoading(false);
     };
 
@@ -83,7 +71,7 @@ export function usePositions() {
 
     // Subscribe to position updates
     const subscription = supabase
-      .channel('user-positions')
+      .channel(`user-positions-${userId}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -98,13 +86,11 @@ export function usePositions() {
     return () => {
       subscription?.unsubscribe();
     };
-  }, [userId, prices]);
+  }, [userId]);
 
-  // Update PnL when prices change
-  useEffect(() => {
-    if (positions.length === 0) return;
-
-    setPositions(prev => prev.map(pos => {
+  // Compute positions with PnL from raw positions + prices
+  const positions: PositionWithPnL[] = useMemo(() => {
+    return rawPositions.map(pos => {
       const currentPrice = prices[pos.symbol] || pos.entry_price;
       return {
         ...pos,
@@ -113,15 +99,17 @@ export function usePositions() {
         currentPrice,
         isLiquidatable: shouldLiquidate(pos, currentPrice),
       };
-    }));
-  }, [prices]);
+    });
+  }, [rawPositions, prices]);
 
   // Check for liquidations
   useEffect(() => {
     const checkLiquidations = async () => {
       for (const pos of positions) {
-        if (pos.isLiquidatable && pos.status === 'open') {
+        if (pos.isLiquidatable && pos.status === 'open' && !liquidatingRef.current.has(pos.id)) {
+          liquidatingRef.current.add(pos.id);
           await liquidatePosition(pos.id, pos.currentPrice);
+          liquidatingRef.current.delete(pos.id);
         }
       }
     };
@@ -139,7 +127,7 @@ export function usePositions() {
 
   // Calculate totals
   const totalUnrealizedPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
-  const totalMargin = positions.reduce((sum, pos) => sum + pos.size, 0);
+  const totalMargin = positions.reduce((sum, pos) => sum + pos.size_fakeusd, 0);
 
   return {
     positions,
@@ -151,17 +139,7 @@ export function usePositions() {
     refetch: async () => {
       if (userId) {
         const openPositions = await getUserOpenPositions(userId);
-        const enriched = openPositions.map(pos => {
-          const currentPrice = prices[pos.symbol] || pos.entry_price;
-          return {
-            ...pos,
-            unrealizedPnL: calculateUnrealizedPnL(pos, currentPrice),
-            pnlPercent: calculatePnLPercent(pos, currentPrice),
-            currentPrice,
-            isLiquidatable: shouldLiquidate(pos, currentPrice),
-          };
-        });
-        setPositions(enriched);
+        setRawPositions(openPositions);
       }
     }
   };

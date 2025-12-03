@@ -63,7 +63,7 @@ export async function calculateUserStats(userId: string): Promise<UserStats> {
     const losses = closedPositions.filter(p => Number(p.realized_pnl) <= 0);
 
     // Calculate total volume (sum of all position sizes * leverage)
-    const totalVolume = positions.reduce((sum, p) => sum + Number(p.size) * p.leverage, 0);
+    const totalVolume = positions.reduce((sum, p) => sum + Number(p.size_fakeusd) * p.leverage, 0);
 
     // Calculate average leverage
     const avgLeverage = positions.length > 0
@@ -189,7 +189,7 @@ export async function getLeaderboard(limit: number = 10): Promise<{
       };
 
       existing.totalPnL += Number(p.realized_pnl || 0);
-      existing.totalVolume += Number(p.size) * p.leverage;
+      existing.totalVolume += Number(p.size_fakeusd) * p.leverage;
       existing.total += 1;
       if (Number(p.realized_pnl || 0) > 0) existing.wins += 1;
 

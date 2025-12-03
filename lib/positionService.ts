@@ -5,7 +5,7 @@ export interface Position {
   user_id: string;
   symbol: string;
   side: 'long' | 'short';
-  size: number;
+  size_fakeusd: number;
   leverage: number;
   entry_price: number;
   liquidation_price: number;
@@ -68,7 +68,7 @@ export function calculateUnrealizedPnL(
   
   // PnL = (price_diff / entry_price) * size * leverage * direction
   const pnlPercent = (priceDiff / position.entry_price) * direction;
-  return pnlPercent * position.size * position.leverage;
+  return pnlPercent * position.size_fakeusd * position.leverage;
 }
 
 /**
@@ -149,7 +149,7 @@ export async function openPosition(params: OpenPositionParams): Promise<{ succes
       user_id: params.userId,
       symbol: params.symbol,
       side: params.side,
-      size: params.size,
+      size_fakeusd: params.size,
       leverage: params.leverage,
       entry_price: params.entryPrice,
       liquidation_price: liquidationPrice,
@@ -228,7 +228,7 @@ export async function closePosition(params: ClosePositionParams): Promise<{ succ
     user_id: position.user_id,
     symbol: position.symbol,
     side: position.side === 'long' ? 'sell' : 'buy', // Opposite side to close
-    size_fakeusd: position.size,
+    size_fakeusd: position.size_fakeusd,
     price: params.exitPrice,
     leverage: position.leverage,
     is_bot: false,
@@ -257,7 +257,7 @@ export async function liquidatePosition(positionId: string, liquidationPrice: nu
   }
 
   // Calculate loss (should be close to -100% of margin)
-  const realizedPnL = -position.size; // Full loss of margin
+  const realizedPnL = -position.size_fakeusd; // Full loss of margin
 
   // Update the position
   const { error } = await supabase

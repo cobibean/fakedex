@@ -24,12 +24,24 @@ export function useChaosEngine({
   const lastCandleRef = useRef<Candle | null>(null);
   const isLeaderRef = useRef(isLeader);
   const symbolRef = useRef(symbol);
+  const previousSymbolRef = useRef(symbol);
 
   // Update refs when props change
   useEffect(() => {
     isLeaderRef.current = isLeader;
     symbolRef.current = symbol;
   }, [isLeader, symbol]);
+
+  // Reset candles when symbol changes (for ticker switching)
+  useEffect(() => {
+    if (previousSymbolRef.current !== symbol) {
+      previousSymbolRef.current = symbol;
+      // Clear candles to force re-initialization with new pair's data
+      setCandles([]);
+      lastCandleRef.current = null;
+      setCurrentPrice(initialPrice);
+    }
+  }, [symbol, initialPrice]);
 
   // Update price in Supabase (only if leader)
   const updatePriceInDb = useCallback(async (price: number) => {
