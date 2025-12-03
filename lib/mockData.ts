@@ -1,12 +1,12 @@
 import { Pair, Achievement, User, Trade } from '@/lib/types';
 
 export const DEFAULT_PAIRS: Pair[] = [
-  { symbol: 'SHIT', name: 'Sovereign Hedge Inflation Token', description: 'The gold standard of nothing.', chaos_override: 65, initial_price: 1 },
-  { symbol: 'HODL', name: 'Hold On for Dear Life', description: 'Only goes up if you look away.', chaos_override: 40, initial_price: 420.69 },
-  { symbol: 'DEGEN', name: 'Degen Coin', description: 'High volatility, high stress.', chaos_override: 85, initial_price: 0.0000001 },
-  { symbol: 'RUG', name: 'Rug Pull Protocol', description: 'It works until it doesn’t.', chaos_override: 95, initial_price: 100 },
-  { symbol: 'COPE', name: 'Cope Inu', description: 'For when you missed the pump.', chaos_override: 30, initial_price: 13.37 },
-  { symbol: 'WAGMI', name: 'We Are All Gonna Make It', description: 'Optimism in token form.', chaos_override: 55, initial_price: 777 },
+  { symbol: 'SHIT', name: 'Sovereign Hedge Inflation Token', description: 'The gold standard of nothing.', chaos_override: 65, initial_price: 1, current_price: null },
+  { symbol: 'HODL', name: 'Hold On for Dear Life', description: 'Only goes up if you look away.', chaos_override: 40, initial_price: 420.69, current_price: null },
+  { symbol: 'DEGEN', name: 'Degen Coin', description: 'High volatility, high stress.', chaos_override: 85, initial_price: 0.0000001, current_price: null },
+  { symbol: 'RUG', name: 'Rug Pull Protocol', description: 'It works until it doesn\'t.', chaos_override: 95, initial_price: 100, current_price: null },
+  { symbol: 'COPE', name: 'Cope Inu', description: 'For when you missed the pump.', chaos_override: 30, initial_price: 13.37, current_price: null },
+  { symbol: 'WAGMI', name: 'We Are All Gonna Make It', description: 'Optimism in token form.', chaos_override: 55, initial_price: 777, current_price: null },
 ];
 
 export const DEFAULT_ACHIEVEMENTS: Achievement[] = [

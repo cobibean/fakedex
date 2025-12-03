@@ -16,6 +16,7 @@ export interface Pair {
   description: string | null;
   chaos_override: number | null;
   initial_price: number;
+  current_price: number | null;  // Live price updated by chaos engine
 }
 
 export interface Trade {

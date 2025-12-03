@@ -374,18 +374,30 @@ export function useAllPrices() {
     }
 
     const fetchPrices = async () => {
-      const { data } = await supabase
-        .from('pairs')
-        .select('symbol, current_price');
-      
-      if (data) {
-        const priceMap: Record<string, number> = {};
-        data.forEach(pair => {
-          priceMap[pair.symbol] = Number(pair.current_price) || 0;
-        });
-        setPrices(priceMap);
+      try {
+        const { data, error } = await supabase
+          .from('pairs')
+          .select('symbol, current_price');
+        
+        if (error) {
+          console.error('[useAllPrices] Fetch error:', error);
+          return;
+        }
+        
+        if (data) {
+          const priceMap: Record<string, number> = {};
+          data.forEach(pair => {
+            // Handle numeric strings from Supabase - use parseFloat for better handling
+            const price = parseFloat(String(pair.current_price));
+            priceMap[pair.symbol] = isNaN(price) ? 0 : price;
+          });
+          setPrices(priceMap);
+        }
+      } catch (err) {
+        console.error('[useAllPrices] Fetch exception:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchPrices();
@@ -398,14 +410,25 @@ export function useAllPrices() {
         schema: 'public',
         table: 'pairs'
       }, (payload) => {
-        if (payload.new.current_price && payload.new.symbol) {
-          setPrices(prev => ({
-            ...prev,
-            [payload.new.symbol]: Number(payload.new.current_price)
-          }));
+        // Use proper null checks instead of truthy checks (0 is a valid price)
+        const newData = payload.new as { current_price?: string | number; symbol?: string };
+        if (newData.symbol !== undefined && newData.current_price !== undefined && newData.current_price !== null) {
+          const price = parseFloat(String(newData.current_price));
+          if (!isNaN(price)) {
+            setPrices(prev => ({
+              ...prev,
+              [newData.symbol as string]: price
+            }));
+          }
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[useAllPrices] Realtime subscription active');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[useAllPrices] Realtime subscription error');
+        }
+      });
 
     return () => {
       subscription?.unsubscribe();

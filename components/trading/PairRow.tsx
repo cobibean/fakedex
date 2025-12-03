@@ -10,8 +10,8 @@ interface PairRowProps {
 }
 
 export function PairRow({ pair, currentPrice, isSelected, onClick }: PairRowProps) {
-  // Use current price if available, otherwise fall back to initial
-  const displayPrice = currentPrice || pair.initial_price;
+  // Use current price if available, fall back to pair's current_price, then initial
+  const displayPrice = currentPrice || pair.current_price || pair.initial_price;
   
   // Calculate actual % change from initial price
   const changePercent = pair.initial_price > 0 
