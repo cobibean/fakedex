@@ -10,6 +10,10 @@ interface UseChaosEngineOptions {
   isLeader?: boolean; // If true, this client generates and saves candles
 }
 
+// Max candles to store - needs to be high enough for larger timeframes
+// 3600 = 1 hour of 1-second candles = 60 one-minute candles
+const MAX_CANDLES = 3600;
+
 export function useChaosEngine({ 
   symbol, 
   initialPrice, 
@@ -161,7 +165,7 @@ export function useChaosEngine({
     const initializeCandles = async () => {
       if (!isSupabaseConfigured || !supabase) {
         // No Supabase - generate random history
-        const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
+        const history = generateInitialHistory(currentPrice, chaosLevel, MAX_CANDLES, 1);
         setCandles(history);
         lastCandleRef.current = history[history.length - 1];
         setIsInitialized(true);
@@ -174,7 +178,7 @@ export function useChaosEngine({
         .select('*')
         .eq('symbol', symbol)
         .order('time', { ascending: true })
-        .limit(200);
+        .limit(MAX_CANDLES);
 
       if (error) {
         console.error('Failed to load candles:', error);
@@ -198,7 +202,7 @@ export function useChaosEngine({
         console.log(`[CANDLES] Loaded ${loadedCandles.length} candles for ${symbol} from DB`);
       } else if (isLeaderRef.current) {
         // No candles in DB and we're the leader - generate initial history
-        const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
+        const history = generateInitialHistory(currentPrice, chaosLevel, MAX_CANDLES, 1);
         setCandles(history);
         lastCandleRef.current = history[history.length - 1];
         
@@ -222,7 +226,7 @@ export function useChaosEngine({
         }
       } else {
         // Not leader and no candles - generate local history (will sync when leader runs)
-        const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
+        const history = generateInitialHistory(currentPrice, chaosLevel, MAX_CANDLES, 1);
         setCandles(history);
         lastCandleRef.current = history[history.length - 1];
       }
@@ -258,7 +262,7 @@ export function useChaosEngine({
           // Avoid duplicates
           if (prev.some(c => c.time === newCandle.time)) return prev;
           const updated = [...prev, newCandle];
-          if (updated.length > 200) updated.shift();
+          if (updated.length > MAX_CANDLES) updated.shift();
           return updated;
         });
         
@@ -285,7 +289,7 @@ export function useChaosEngine({
       
       setCandles((prev) => {
         const newHistory = [...prev, next];
-        if (newHistory.length > 200) newHistory.shift();
+        if (newHistory.length > MAX_CANDLES) newHistory.shift();
         return newHistory;
       });
       
