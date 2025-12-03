@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { TradePanel } from '@/components/trading/TradePanel';
@@ -62,16 +63,30 @@ export default function Home() {
       </div>
 
       <div className="lg:col-span-7 flex flex-col gap-6 h-full overflow-hidden">
-        <div className="flex-[2] glass-panel rounded-xl p-4 border border-gray-800 flex flex-col min-h-0">
+        <div className="flex-2 glass-panel rounded-xl p-4 border border-gray-800 flex flex-col min-h-0">
           <div className="flex justify-between items-center mb-2 px-2">
             <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
               {activeSymbol} <span className="text-gray-500 text-sm">/ FAKEUSD</span>
             </h2>
-            <div className="font-mono text-xl text-green-400">${currentPrice.toFixed(4)}</div>
+            <div className="flex items-center gap-3">
+              <div className="font-mono text-xl text-green-400">${currentPrice.toFixed(4)}</div>
+              <Link
+                href={`/pair/${activeSymbol}`}
+                className="text-xs font-mono uppercase tracking-wide border border-gray-700 px-3 py-1 rounded-full text-gray-400 hover:text-white hover:border-green-500 transition-colors"
+              >
+                Open Terminal
+              </Link>
+            </div>
           </div>
           <div className="flex-1 w-full relative">
             <div className="absolute inset-0">
-              <Chart data={candles} />
+              {candles.length > 0 ? (
+                <Chart data={candles} />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-500">
+                  Loading chart data...
+                </div>
+              )}
             </div>
           </div>
         </div>

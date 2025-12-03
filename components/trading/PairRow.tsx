@@ -1,6 +1,7 @@
 import { Pair } from '@/lib/types';
 import { clsx } from 'clsx';
 import { ArrowUp, ArrowDown } from 'lucide-react';
+import { hashString } from '@/lib/utils';
 
 interface PairRowProps {
   pair: Pair;
@@ -8,17 +9,8 @@ interface PairRowProps {
   onClick?: () => void;
 }
 
-function getPseudoRandomForSymbol(symbol: string) {
-  let hash = 0;
-  for (let i = 0; i < symbol.length; i++) {
-    hash = (hash << 5) - hash + symbol.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
 export function PairRow({ pair, isSelected, onClick }: PairRowProps) {
-  const hash = getPseudoRandomForSymbol(pair.symbol);
+  const hash = hashString(pair.symbol);
   const isGreen = hash % 2 === 0;
   const change = ((hash % 2000) / 100).toFixed(2);
 
@@ -38,8 +30,8 @@ export function PairRow({ pair, isSelected, onClick }: PairRowProps) {
       <div className="text-right">
         <div className="font-mono text-sm text-gray-300">${pair.initial_price.toLocaleString()}</div>
         <div className={clsx("text-xs font-mono flex items-center justify-end gap-1", isGreen ? "text-green-500" : "text-red-500")}>
-           {isGreen ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-           {change}%
+          {isGreen ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+          {change}%
         </div>
       </div>
     </div>

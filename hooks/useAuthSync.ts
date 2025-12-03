@@ -21,7 +21,10 @@ export function useAuthSync() {
           .single();
 
         if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "not found"
-          console.error("Error checking user:", fetchError);
+          // Only log if there's actual error content
+          if (fetchError.message || fetchError.details) {
+            console.error("Error checking user:", fetchError.message || fetchError.details);
+          }
           return;
         }
 

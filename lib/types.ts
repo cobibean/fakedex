@@ -39,3 +39,23 @@ export interface Achievement {
   earned_at?: string;
 }
 
+export interface Comment {
+  id: string;
+  user_id: string;
+  profile_id: string;
+  content: string;
+  created_at: string;
+  user?: {
+    username: string | null;
+    wallet_address: string;
+    level: number;
+  };
+}
+
+export interface TradeWithUser extends Trade {
+  users?: {
+    username: string | null;
+    wallet_address: string;
+  };
+}
+

@@ -91,16 +91,11 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
 
     const interval = setInterval(() => {
       const last = lastCandleRef.current!;
-      const now = Math.floor(Date.now() / 1000);
+      // Ensure each candle has a unique, strictly increasing timestamp
+      // Use the last candle's time + 1 second to guarantee ascending order
+      const nextTime = last.time + 1;
       
-      // In a real chart, we might update the *current* candle if within same minute,
-      // or push a new one. For V1 visual flair, let's push a new "tick" every interval
-      // but effectively we are simulating a new candle every X seconds.
-      // For smooth UI, we'll generate a new candle "tick" that represents a new time slice.
-      
-      // Note: To prevent memory leaks in V1 array, we slice simulated history.
-      
-      const next = generateNextCandle(last.close, chaosLevel, now);
+      const next = generateNextCandle(last.close, chaosLevel, nextTime);
       
       setCandles((prev) => {
         const newHistory = [...prev, next];
