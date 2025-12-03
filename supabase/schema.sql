@@ -62,6 +62,25 @@ create table public.settings (
   value jsonb not null
 );
 
+-- Candle history for persistent charts (all users see same chart)
+create table public.candles (
+  id uuid primary key default gen_random_uuid(),
+  symbol text not null references public.pairs(symbol) on delete cascade,
+  time integer not null, -- Unix timestamp (seconds)
+  open numeric(38, 18) not null,
+  high numeric(38, 18) not null,
+  low numeric(38, 18) not null,
+  close numeric(38, 18) not null,
+  volume numeric(38, 18) not null,
+  unique (symbol, time)
+);
+
+-- Index for efficient candle queries
+create index idx_candles_symbol_time on public.candles (symbol, time desc);
+
+-- Add current_price column to pairs for live price tracking
+alter table public.pairs add column if not exists current_price numeric(38, 18);
+
 -- SEED DATA: Pairs
 insert into public.pairs (symbol, name, description, initial_price) values
 ('SHIT', 'Sovereign Hedge Inflation Token', 'The gold standard of nothing.', 1.0),

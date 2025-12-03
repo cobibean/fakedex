@@ -26,9 +26,11 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
     const [stopLoss, setStopLoss] = useState<string>('');
     const [takeProfit, setTakeProfit] = useState<string>('');
 
-    // Fetch user ID and balance
+    // Fetch user ID and balance with realtime updates
     useEffect(() => {
         if (!account?.address || !isSupabaseConfigured || !supabase) return;
+
+        let subscription: ReturnType<typeof supabase.channel> | null = null;
 
         const fetchUserData = async () => {
             const { data: user } = await supabase
@@ -49,10 +51,29 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                     .maybeSingle();
                 
                 setBalance(Number(balanceData?.amount || 0));
+                
+                // Subscribe to balance changes for real-time updates
+                subscription = supabase
+                    .channel(`trade-balance-${user.id}`)
+                    .on('postgres_changes', {
+                        event: '*',
+                        schema: 'public',
+                        table: 'user_balances',
+                        filter: `user_id=eq.${user.id}`
+                    }, (payload) => {
+                        if (payload.new && 'amount' in payload.new) {
+                            setBalance(Number(payload.new.amount) || 0);
+                        }
+                    })
+                    .subscribe();
             }
         };
 
         fetchUserData();
+        
+        return () => {
+            subscription?.unsubscribe();
+        };
     }, [account?.address]);
 
     // Calculate preview values

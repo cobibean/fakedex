@@ -7,7 +7,7 @@ interface UseChaosEngineOptions {
   symbol: string;
   initialPrice: number;
   intervalMs?: number;
-  isLeader?: boolean; // If true, this client updates prices in Supabase
+  isLeader?: boolean; // If true, this client generates and saves candles
 }
 
 export function useChaosEngine({ 
@@ -20,6 +20,7 @@ export function useChaosEngine({
   const [currentPrice, setCurrentPrice] = useState<number>(initialPrice);
   const [chaosLevel, setChaosLevel] = useState<number>(50);
   const [globalChaos, setGlobalChaos] = useState<number>(50);
+  const [isInitialized, setIsInitialized] = useState(false);
   
   const lastCandleRef = useRef<Candle | null>(null);
   const isLeaderRef = useRef(isLeader);
@@ -32,14 +33,14 @@ export function useChaosEngine({
     symbolRef.current = symbol;
   }, [isLeader, symbol]);
 
-  // Reset candles when symbol changes (for ticker switching)
+  // Reset when symbol changes
   useEffect(() => {
     if (previousSymbolRef.current !== symbol) {
       previousSymbolRef.current = symbol;
-      // Clear candles to force re-initialization with new pair's data
       setCandles([]);
       lastCandleRef.current = null;
       setCurrentPrice(initialPrice);
+      setIsInitialized(false);
     }
   }, [symbol, initialPrice]);
 
@@ -54,6 +55,27 @@ export function useChaosEngine({
         .eq('symbol', symbolRef.current);
     } catch (error) {
       console.error('Failed to update price in DB:', error);
+    }
+  }, []);
+
+  // Save candle to database (only if leader)
+  const saveCandleToDb = useCallback(async (candle: Candle) => {
+    if (!isLeaderRef.current || !isSupabaseConfigured || !supabase) return;
+    
+    try {
+      await supabase
+        .from('candles')
+        .upsert({
+          symbol: symbolRef.current,
+          time: candle.time,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        }, { onConflict: 'symbol,time' });
+    } catch (error) {
+      console.error('Failed to save candle:', error);
     }
   }, []);
 
@@ -132,25 +154,132 @@ export function useChaosEngine({
     };
   }, [symbol, globalChaos]);
 
-  // 2. Initialize History (always 1-second base candles)
+  // 2. Load candles from DB or generate initial history
   useEffect(() => {
-    if (candles.length === 0 && currentPrice > 0) {
-      // Generate 1-second base candles - timeframe aggregation happens in chart
-      const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
-      setCandles(history);
-      const last = history[history.length - 1];
-      lastCandleRef.current = last;
-    }
-  }, [currentPrice, chaosLevel, candles.length]);
+    if (isInitialized || currentPrice <= 0) return;
 
-  // 3. Live Updates (The Chaos Heartbeat) - Generate 1-second base candles
+    const initializeCandles = async () => {
+      if (!isSupabaseConfigured || !supabase) {
+        // No Supabase - generate random history
+        const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
+        setCandles(history);
+        lastCandleRef.current = history[history.length - 1];
+        setIsInitialized(true);
+        return;
+      }
+
+      // Try to load existing candles from DB
+      const { data: existingCandles, error } = await supabase
+        .from('candles')
+        .select('*')
+        .eq('symbol', symbol)
+        .order('time', { ascending: true })
+        .limit(200);
+
+      if (error) {
+        console.error('Failed to load candles:', error);
+      }
+
+      if (existingCandles && existingCandles.length > 0) {
+        // Use existing candles from DB
+        const loadedCandles: Candle[] = existingCandles.map(c => ({
+          time: c.time,
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+          volume: Number(c.volume),
+        }));
+        
+        setCandles(loadedCandles);
+        const last = loadedCandles[loadedCandles.length - 1];
+        lastCandleRef.current = last;
+        setCurrentPrice(last.close);
+        console.log(`[CANDLES] Loaded ${loadedCandles.length} candles for ${symbol} from DB`);
+      } else if (isLeaderRef.current) {
+        // No candles in DB and we're the leader - generate initial history
+        const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
+        setCandles(history);
+        lastCandleRef.current = history[history.length - 1];
+        
+        // Save initial history to DB
+        console.log(`[CANDLES] Generating and saving ${history.length} candles for ${symbol}`);
+        const candlesToSave = history.map(c => ({
+          symbol,
+          time: c.time,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        }));
+        
+        // Batch insert in chunks to avoid payload limits
+        const chunkSize = 50;
+        for (let i = 0; i < candlesToSave.length; i += chunkSize) {
+          const chunk = candlesToSave.slice(i, i + chunkSize);
+          await supabase.from('candles').upsert(chunk, { onConflict: 'symbol,time' });
+        }
+      } else {
+        // Not leader and no candles - generate local history (will sync when leader runs)
+        const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
+        setCandles(history);
+        lastCandleRef.current = history[history.length - 1];
+      }
+      
+      setIsInitialized(true);
+    };
+
+    initializeCandles();
+  }, [currentPrice, chaosLevel, symbol, isInitialized]);
+
+  // 3. Subscribe to new candles from DB (for non-leader clients)
   useEffect(() => {
-    if (!lastCandleRef.current) return;
+    if (!isSupabaseConfigured || !supabase || isLeaderRef.current) return;
 
-    // Always generate 1-second candles - timeframe aggregation happens in chart
+    const subscription = supabase
+      .channel(`candles-${symbol}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'candles',
+        filter: `symbol=eq.${symbol}`
+      }, (payload) => {
+        const newCandle: Candle = {
+          time: payload.new.time,
+          open: Number(payload.new.open),
+          high: Number(payload.new.high),
+          low: Number(payload.new.low),
+          close: Number(payload.new.close),
+          volume: Number(payload.new.volume),
+        };
+        
+        setCandles(prev => {
+          // Avoid duplicates
+          if (prev.some(c => c.time === newCandle.time)) return prev;
+          const updated = [...prev, newCandle];
+          if (updated.length > 200) updated.shift();
+          return updated;
+        });
+        
+        lastCandleRef.current = newCandle;
+        setCurrentPrice(newCandle.close);
+      })
+      .subscribe();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [symbol]);
+
+  // 4. Live Updates - Leader generates and saves candles
+  useEffect(() => {
+    if (!lastCandleRef.current || !isInitialized) return;
+    if (!isLeaderRef.current) return; // Non-leaders get candles via subscription
+
     const interval = setInterval(() => {
       const last = lastCandleRef.current!;
-      const nextTime = last.time + 1; // Always 1 second increment
+      const nextTime = last.time + 1;
       
       const next = generateNextCandle(last.close, chaosLevel, nextTime);
       
@@ -163,15 +292,14 @@ export function useChaosEngine({
       lastCandleRef.current = next;
       setCurrentPrice(next.close);
       
-      // Leader updates the price in DB
-      if (isLeaderRef.current) {
-        updatePriceInDb(next.close);
-      }
+      // Save candle and price to DB
+      saveCandleToDb(next);
+      updatePriceInDb(next.close);
       
-    }, 1000); // Always 1-second ticks - aggregation to timeframes happens in chart
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, [chaosLevel, updatePriceInDb]);
+  }, [chaosLevel, isInitialized, saveCandleToDb, updatePriceInDb]);
 
   return {
     candles,
