@@ -24,14 +24,11 @@ function getLine(chaosLevel: number) {
 export function VicPanel({ chaosLevel, symbol = 'SHIT', isOverride, price }: VicPanelProps) {
   return (
     <motion.div
-      className="glass-panel rounded-xl border border-gray-800 p-4 flex gap-3 items-start"
+      className="glass-panel rounded-xl border border-gray-800 p-4"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
     >
-      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xs font-black shadow-lg">
-        VIC
-      </div>
       <div className="space-y-2">
         <div>
           <p className="text-sm font-bold text-white">Vic&apos;s Terminal Rant</p>
