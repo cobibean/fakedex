@@ -15,13 +15,21 @@ import { useBotTrades } from '@/hooks/useBotTrades';
 import { useXP } from '@/hooks/useXP';
 import { usePositions } from '@/hooks/usePositions';
 
-// Get initial sidebar width from localStorage or default
+// Get initial panel widths from localStorage or defaults
 const getInitialSidebarWidth = () => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('pairListWidth');
     if (saved) return Math.max(150, Math.min(400, parseInt(saved)));
   }
   return 200;
+};
+
+const getInitialRightPanelWidth = () => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('rightPanelWidth');
+    if (saved) return Math.max(280, Math.min(500, parseInt(saved)));
+  }
+  return 340;
 };
 
 export default function Home() {
@@ -32,39 +40,64 @@ export default function Home() {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [bottomPanelView, setBottomPanelView] = useState<'orders' | 'positions'>('orders');
   
-  // Resizable sidebar state
+  // Resizable panels state
   const [sidebarWidth, setSidebarWidth] = useState(200);
-  const [isResizing, setIsResizing] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(340);
+  const [isResizingLeft, setIsResizingLeft] = useState(false);
+  const [isResizingRight, setIsResizingRight] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
 
-  // Load saved width on mount
+  // Load saved widths on mount
   useEffect(() => {
     setSidebarWidth(getInitialSidebarWidth());
+    setRightPanelWidth(getInitialRightPanelWidth());
   }, []);
 
-  // Handle resize
-  const startResizing = useCallback((e: React.MouseEvent) => {
+  // Handle left sidebar resize
+  const startResizingLeft = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setIsResizing(true);
+    setIsResizingLeft(true);
   }, []);
 
+  // Handle right panel resize
+  const startResizingRight = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingRight(true);
+  }, []);
+
+  // Combined resize effect for both panels
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
+      if (isResizingLeft && sidebarRef.current) {
+        const newWidth = e.clientX - sidebarRef.current.getBoundingClientRect().left;
+        const clampedWidth = Math.max(150, Math.min(400, newWidth));
+        setSidebarWidth(clampedWidth);
+      }
       
-      const newWidth = e.clientX - (sidebarRef.current?.getBoundingClientRect().left || 0);
-      const clampedWidth = Math.max(150, Math.min(400, newWidth));
-      setSidebarWidth(clampedWidth);
-    };
-
-    const handleMouseUp = () => {
-      if (isResizing) {
-        setIsResizing(false);
-        localStorage.setItem('pairListWidth', sidebarWidth.toString());
+      if (isResizingRight && rightPanelRef.current) {
+        // For right panel, calculate width from right edge of viewport
+        const containerRight = window.innerWidth;
+        const newWidth = containerRight - e.clientX;
+        const clampedWidth = Math.max(280, Math.min(500, newWidth));
+        setRightPanelWidth(clampedWidth);
       }
     };
 
-    if (isResizing) {
+    const handleMouseUp = () => {
+      if (isResizingLeft) {
+        setIsResizingLeft(false);
+        localStorage.setItem('pairListWidth', sidebarWidth.toString());
+      }
+      if (isResizingRight) {
+        setIsResizingRight(false);
+        localStorage.setItem('rightPanelWidth', rightPanelWidth.toString());
+      }
+    };
+
+    const isAnyResizing = isResizingLeft || isResizingRight;
+    
+    if (isAnyResizing) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'col-resize';
@@ -77,7 +110,7 @@ export default function Home() {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isResizing, sidebarWidth]);
+  }, [isResizingLeft, isResizingRight, sidebarWidth, rightPanelWidth]);
 
   useEffect(() => {
     if (!activeSymbol && pairs.length > 0) {
@@ -94,7 +127,6 @@ export default function Home() {
   const { candles, currentPrice, chaosLevel, isOverride } = useChaosEngine({
     symbol: activeSymbol || pairs[0]?.symbol || 'SHIT',
     initialPrice: currentPair?.initial_price || 1,
-    intervalMs: 1200,
     isLeader: true,
   });
 
@@ -169,16 +201,16 @@ export default function Home() {
           
           {/* Resize Handle */}
           <div
-            onMouseDown={startResizing}
+            onMouseDown={startResizingLeft}
             className={`absolute right-0 top-0 bottom-0 w-3 cursor-col-resize group flex items-center justify-center z-10 transition-colors ${
-              isResizing ? 'bg-green-500/20' : 'hover:bg-gray-700/30'
+              isResizingLeft ? 'bg-green-500/20' : 'hover:bg-gray-700/30'
             }`}
             style={{ transform: 'translateX(50%)' }}
           >
             <div className={`flex flex-col items-center justify-center gap-0.5 transition-opacity ${
-              isResizing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              isResizingLeft ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}>
-              <GripVertical className={`w-3 h-3 ${isResizing ? 'text-green-400' : 'text-gray-500'}`} />
+              <GripVertical className={`w-3 h-3 ${isResizingLeft ? 'text-green-400' : 'text-gray-500'}`} />
             </div>
           </div>
         </div>
@@ -203,7 +235,22 @@ export default function Home() {
             <div className="flex-1 w-full relative">
               <div className="absolute inset-0">
                 {candles.length > 0 ? (
-                  <Chart data={candles} />
+                  <Chart 
+                    data={candles} 
+                    positions={positions.map(p => ({
+                      id: p.id,
+                      symbol: p.symbol,
+                      side: p.side,
+                      entry_price: p.entry_price,
+                      liquidation_price: p.liquidation_price,
+                      size_fakeusd: p.size_fakeusd,
+                      leverage: p.leverage,
+                      unrealizedPnL: p.unrealizedPnL,
+                      pnlPercent: p.pnlPercent,
+                    }))}
+                    currentPrice={currentPrice}
+                    symbol={activeSymbol}
+                  />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-gray-500">
                     Loading chart data...
@@ -265,37 +312,64 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="w-full lg:w-80 xl:w-96 flex-shrink-0 flex flex-col gap-2 h-full overflow-y-auto scrollbar-hide pb-4">
-          <TradePanel symbol={activeSymbol} currentPrice={currentPrice} onTradeSuccess={handleTradeSuccess} />
-
-          {/* Chaos & XP Row - Side by Side */}
-          <div className="grid grid-cols-2 gap-2">
-            {/* Chaos Level - Compact */}
-            <div className="glass-panel rounded-lg p-2 border border-gray-800">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[10px] text-gray-500 uppercase">Chaos</span>
-                {isOverride && <AlertTriangle className="w-2.5 h-2.5 text-orange-400" />}
-              </div>
-              <div className="text-lg font-mono font-bold text-purple-400">{chaosLevel}%</div>
-              <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden mt-1">
-                <div className="h-full bg-purple-500 transition-all duration-500" style={{ width: `${chaosLevel}%` }} />
-              </div>
+        {/* Resizable Right Panel */}
+        <div 
+          ref={rightPanelRef}
+          className="hidden lg:flex flex-shrink-0 relative"
+          style={{ width: rightPanelWidth }}
+        >
+          {/* Resize Handle on Left */}
+          <div
+            onMouseDown={startResizingRight}
+            className={`absolute left-0 top-0 bottom-0 w-3 cursor-col-resize group flex items-center justify-center z-10 transition-colors ${
+              isResizingRight ? 'bg-green-500/20' : 'hover:bg-gray-700/30'
+            }`}
+            style={{ transform: 'translateX(-50%)' }}
+          >
+            <div className={`flex flex-col items-center justify-center gap-0.5 transition-opacity ${
+              isResizingRight ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}>
+              <GripVertical className={`w-3 h-3 ${isResizingRight ? 'text-green-400' : 'text-gray-500'}`} />
             </div>
+          </div>
 
-            {/* XP - Compact */}
-            <div className="glass-panel rounded-lg p-2 border border-gray-800">
-              <div className="text-[10px] text-gray-500 uppercase mb-1">Level</div>
-              <div className="text-lg font-mono font-bold text-yellow-400">
-                {profile?.level || 1}
+          <div className="flex-1 flex flex-col gap-2 h-full overflow-y-auto scrollbar-hide pb-4">
+            <TradePanel symbol={activeSymbol} currentPrice={currentPrice} onTradeSuccess={handleTradeSuccess} />
+
+            {/* Chaos & XP Row - Side by Side */}
+            <div className="grid grid-cols-2 gap-2">
+              {/* Chaos Level - Compact */}
+              <div className="glass-panel rounded-lg p-2 border border-gray-800">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] text-gray-500 uppercase">Chaos</span>
+                  {isOverride && <AlertTriangle className="w-2.5 h-2.5 text-orange-400" />}
+                </div>
+                <div className="text-lg font-mono font-bold text-purple-400">{chaosLevel}%</div>
+                <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden mt-1">
+                  <div className="h-full bg-purple-500 transition-all duration-500" style={{ width: `${chaosLevel}%` }} />
+                </div>
               </div>
-              <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden mt-1">
-                <div 
-                  className="h-full bg-yellow-500 transition-all duration-500" 
-                  style={{ width: `${((profile?.xp || 0) % 100)}%` }} 
-                />
+
+              {/* XP - Compact */}
+              <div className="glass-panel rounded-lg p-2 border border-gray-800">
+                <div className="text-[10px] text-gray-500 uppercase mb-1">Level</div>
+                <div className="text-lg font-mono font-bold text-yellow-400">
+                  {profile?.level || 1}
+                </div>
+                <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden mt-1">
+                  <div 
+                    className="h-full bg-yellow-500 transition-all duration-500" 
+                    style={{ width: `${((profile?.xp || 0) % 100)}%` }} 
+                  />
+                </div>
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Mobile-only right panel (not resizable) */}
+        <div className="lg:hidden w-full flex flex-col gap-2 h-full overflow-y-auto scrollbar-hide pb-4">
+          <TradePanel symbol={activeSymbol} currentPrice={currentPrice} onTradeSuccess={handleTradeSuccess} />
         </div>
       </div>
     </>

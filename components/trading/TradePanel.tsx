@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useActiveAccount } from "thirdweb/react";
-import { Loader2, Wallet, TrendingUp, Zap, AlertTriangle } from 'lucide-react';
+import { Loader2, Wallet, TrendingUp, Zap, Target, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { openPosition, calculateLiquidationPrice } from '@/lib/positionService';
 
@@ -20,6 +20,11 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
     const [loading, setLoading] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
     const [balance, setBalance] = useState<number>(0);
+    
+    // SL/TP state
+    const [showSlTp, setShowSlTp] = useState(false);
+    const [stopLoss, setStopLoss] = useState<string>('');
+    const [takeProfit, setTakeProfit] = useState<string>('');
 
     // Fetch user ID and balance
     useEffect(() => {
@@ -90,7 +95,10 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
         setLoading(true);
 
         try {
-            // Open position
+            // Open position with optional SL/TP
+            const slPrice = stopLoss ? parseFloat(stopLoss) : undefined;
+            const tpPrice = takeProfit ? parseFloat(takeProfit) : undefined;
+            
             const result = await openPosition({
                 userId,
                 symbol,
@@ -98,6 +106,8 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                 size: amountNum,
                 leverage,
                 entryPrice: currentPrice,
+                stopLoss: slPrice,
+                takeProfit: tpPrice,
             });
 
             if (!result.success) {
@@ -116,6 +126,9 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
 
             setBalance(newBalance);
             setAmount('');
+            setStopLoss('');
+            setTakeProfit('');
+            setShowSlTp(false);
             
             if (onTradeSuccess) onTradeSuccess();
 
@@ -209,6 +222,92 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                     </div>
                 </div>
 
+                {/* Stop Loss / Take Profit Toggle */}
+                <div className="space-y-2">
+                    <button
+                        onClick={() => setShowSlTp(!showSlTp)}
+                        className="w-full flex items-center justify-between text-xs text-gray-400 hover:text-white transition-colors py-1"
+                    >
+                        <span className="flex items-center gap-1.5">
+                            <Target className="w-3.5 h-3.5" />
+                            Stop Loss / Take Profit
+                        </span>
+                        {showSlTp ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                    
+                    {showSlTp && (
+                        <div className="grid grid-cols-2 gap-2">
+                            {/* Stop Loss */}
+                            <div className="bg-black/40 p-2 rounded-lg border border-gray-700 focus-within:border-red-500/50">
+                                <label className="text-[9px] text-red-400 font-mono uppercase block mb-1">Stop Loss</label>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-gray-500 font-mono text-xs">$</span>
+                                    <input 
+                                        type="number" 
+                                        value={stopLoss}
+                                        onChange={(e) => setStopLoss(e.target.value)}
+                                        placeholder={side === 'long' 
+                                            ? (currentPrice * 0.95).toFixed(5) 
+                                            : (currentPrice * 1.05).toFixed(5)}
+                                        className="w-full bg-transparent outline-none font-mono text-sm text-white placeholder-gray-700" 
+                                    />
+                                </div>
+                                {/* Quick SL buttons */}
+                                <div className="flex gap-1 mt-1.5">
+                                    {[2, 5, 10].map(pct => {
+                                        const slPrice = side === 'long' 
+                                            ? currentPrice * (1 - pct/100)
+                                            : currentPrice * (1 + pct/100);
+                                        return (
+                                            <button
+                                                key={pct}
+                                                onClick={() => setStopLoss(slPrice.toFixed(5))}
+                                                className="flex-1 text-[9px] px-1 py-0.5 bg-red-900/30 hover:bg-red-900/50 rounded text-red-400 hover:text-red-300 transition-colors"
+                                            >
+                                                -{pct}%
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            
+                            {/* Take Profit */}
+                            <div className="bg-black/40 p-2 rounded-lg border border-gray-700 focus-within:border-green-500/50">
+                                <label className="text-[9px] text-green-400 font-mono uppercase block mb-1">Take Profit</label>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-gray-500 font-mono text-xs">$</span>
+                                    <input 
+                                        type="number" 
+                                        value={takeProfit}
+                                        onChange={(e) => setTakeProfit(e.target.value)}
+                                        placeholder={side === 'long' 
+                                            ? (currentPrice * 1.10).toFixed(5) 
+                                            : (currentPrice * 0.90).toFixed(5)}
+                                        className="w-full bg-transparent outline-none font-mono text-sm text-white placeholder-gray-700" 
+                                    />
+                                </div>
+                                {/* Quick TP buttons */}
+                                <div className="flex gap-1 mt-1.5">
+                                    {[5, 10, 25].map(pct => {
+                                        const tpPrice = side === 'long' 
+                                            ? currentPrice * (1 + pct/100)
+                                            : currentPrice * (1 - pct/100);
+                                        return (
+                                            <button
+                                                key={pct}
+                                                onClick={() => setTakeProfit(tpPrice.toFixed(5))}
+                                                className="flex-1 text-[9px] px-1 py-0.5 bg-green-900/30 hover:bg-green-900/50 rounded text-green-400 hover:text-green-300 transition-colors"
+                                            >
+                                                +{pct}%
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
                 {/* Preview Details - Compact */}
                 {amountNum > 0 && (
                     <div className="p-2 bg-gray-900/50 rounded border border-gray-800 space-y-1 text-[11px] font-mono">
@@ -224,6 +323,18 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                             <span className="text-gray-500">Liq. Price</span>
                             <span className="text-orange-400">${liquidationPrice.toFixed(5)} ({liqDistance.toFixed(1)}%)</span>
                         </div>
+                        {stopLoss && (
+                            <div className="flex justify-between">
+                                <span className="text-gray-500">Stop Loss</span>
+                                <span className="text-red-400">${parseFloat(stopLoss).toFixed(5)}</span>
+                            </div>
+                        )}
+                        {takeProfit && (
+                            <div className="flex justify-between">
+                                <span className="text-gray-500">Take Profit</span>
+                                <span className="text-green-400">${parseFloat(takeProfit).toFixed(5)}</span>
+                            </div>
+                        )}
                     </div>
                 )}
 

@@ -4,10 +4,11 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Info, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Info } from 'lucide-react';
 import { usePairs } from '@/hooks/usePairs';
 import { useChaosEngine } from '@/hooks/useChaosEngine';
 import { useBotTrades } from '@/hooks/useBotTrades';
+import { usePositions } from '@/hooks/usePositions';
 import { Chart } from '@/components/trading/Chart';
 import { OrderFeed } from '@/components/trading/OrderFeed';
 import { TradePanel } from '@/components/trading/TradePanel';
@@ -34,6 +35,7 @@ export default function PairTerminalPage() {
     intervalMs: 900,
   });
 
+  const { positions } = usePositions();
   useBotTrades(pairs, true);
 
   if (!pair) {
@@ -73,20 +75,23 @@ export default function PairTerminalPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 text-xs font-mono text-gray-500 uppercase">
-              <span>Chart Controls</span>
-              <button className="px-2 py-1 rounded-full border border-gray-800 hover:border-gray-600 transition-colors">1M</button>
-              <button className="px-2 py-1 rounded-full border border-gray-800 hover:border-gray-600 transition-colors">5M</button>
-              <button className="px-2 py-1 rounded-full border border-gray-800 hover:border-gray-600 transition-colors">15M</button>
-              <button className="px-2 py-1 rounded-full border border-green-600 text-green-400">LIVE</button>
-            </div>
-            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors">
-              <SlidersHorizontal className="w-4 h-4" /> Layout
-            </button>
-          </div>
           <div className="h-[420px] relative">
-            <Chart data={candles} />
+            <Chart 
+              data={candles}
+              positions={positions.map(p => ({
+                id: p.id,
+                symbol: p.symbol,
+                side: p.side,
+                entry_price: p.entry_price,
+                liquidation_price: p.liquidation_price,
+                size_fakeusd: p.size_fakeusd,
+                leverage: p.leverage,
+                unrealizedPnL: p.unrealizedPnL,
+                pnlPercent: p.pnlPercent,
+              }))}
+              currentPrice={currentPrice}
+              symbol={symbol}
+            />
           </div>
         </motion.div>
 

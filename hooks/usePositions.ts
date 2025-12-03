@@ -10,7 +10,9 @@ import {
   calculateUnrealizedPnL,
   calculatePnLPercent,
   shouldLiquidate,
-  liquidatePosition
+  liquidatePosition,
+  shouldTriggerStopLoss,
+  shouldTriggerTakeProfit
 } from '@/lib/positionService';
 import { useAllPrices } from './useChaosEngine';
 
@@ -19,6 +21,8 @@ export interface PositionWithPnL extends Position {
   pnlPercent: number;
   currentPrice: number;
   isLiquidatable: boolean;
+  shouldTriggerSL: boolean;
+  shouldTriggerTP: boolean;
 }
 
 export function usePositions() {
@@ -98,24 +102,44 @@ export function usePositions() {
         pnlPercent: calculatePnLPercent(pos, currentPrice),
         currentPrice,
         isLiquidatable: shouldLiquidate(pos, currentPrice),
+        shouldTriggerSL: shouldTriggerStopLoss(pos, currentPrice),
+        shouldTriggerTP: shouldTriggerTakeProfit(pos, currentPrice),
       };
     });
   }, [rawPositions, prices]);
 
-  // Check for liquidations
+  // Check for liquidations, stop loss, and take profit triggers
   useEffect(() => {
-    const checkLiquidations = async () => {
+    const checkTriggersAndLiquidations = async () => {
       for (const pos of positions) {
-        if (pos.isLiquidatable && pos.status === 'open' && !liquidatingRef.current.has(pos.id)) {
+        if (pos.status !== 'open' || liquidatingRef.current.has(pos.id)) continue;
+        
+        // Priority: Liquidation > Stop Loss > Take Profit
+        if (pos.isLiquidatable) {
           liquidatingRef.current.add(pos.id);
+          console.log(`[LIQUIDATION] Position ${pos.id} liquidated at ${pos.currentPrice}`);
           await liquidatePosition(pos.id, pos.currentPrice);
+          liquidatingRef.current.delete(pos.id);
+        } else if (pos.shouldTriggerSL && pos.stop_loss) {
+          liquidatingRef.current.add(pos.id);
+          console.log(`[STOP LOSS] Position ${pos.id} closed at ${pos.stop_loss}`);
+          await closePosition({ positionId: pos.id, exitPrice: pos.stop_loss });
+          liquidatingRef.current.delete(pos.id);
+        } else if (pos.shouldTriggerTP && pos.take_profit) {
+          liquidatingRef.current.add(pos.id);
+          console.log(`[TAKE PROFIT] Position ${pos.id} closed at ${pos.take_profit}`);
+          await closePosition({ positionId: pos.id, exitPrice: pos.take_profit });
           liquidatingRef.current.delete(pos.id);
         }
       }
     };
 
-    if (positions.some(p => p.isLiquidatable)) {
-      checkLiquidations();
+    const hasTriggeredPositions = positions.some(p => 
+      p.isLiquidatable || p.shouldTriggerSL || p.shouldTriggerTP
+    );
+    
+    if (hasTriggeredPositions) {
+      checkTriggersAndLiquidations();
     }
   }, [positions]);
 

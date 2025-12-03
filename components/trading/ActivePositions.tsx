@@ -65,8 +65,17 @@ function PositionRow({
                   {position.leverage}x
                 </span>
               </div>
-              <div className="text-xs text-gray-500 font-mono">
-                Size: ${position.size_fakeusd.toLocaleString()}
+              <div className="text-xs text-gray-500 font-mono flex items-center gap-2">
+                <span>Entry: ${position.entry_price.toFixed(5)}</span>
+                <span className="text-gray-600">|</span>
+                <span>Size: ${position.size_fakeusd.toLocaleString()}</span>
+                {(position.stop_loss || position.take_profit) && (
+                  <>
+                    <span className="text-gray-600">|</span>
+                    {position.stop_loss && <span className="text-red-400">SL</span>}
+                    {position.take_profit && <span className="text-green-400">TP</span>}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -282,49 +291,71 @@ function InlinePositionRow({
   const isProfitable = position.unrealizedPnL >= 0;
 
   return (
-    <div className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
+    <div className={`px-2 py-1.5 rounded text-xs ${
       position.isLiquidatable 
         ? 'bg-red-500/20 border border-red-500/50' 
         : 'bg-gray-800/50 hover:bg-gray-800'
     }`}>
-      {/* Left: Symbol & Direction */}
-      <div className="flex items-center gap-2">
-        {isLong ? (
-          <TrendingUp className="w-3 h-3 text-green-500" />
-        ) : (
-          <TrendingDown className="w-3 h-3 text-red-500" />
-        )}
-        <span className="font-bold text-white">{position.symbol}</span>
-        <span className={`font-mono text-[10px] ${isLong ? 'text-green-400' : 'text-red-400'}`}>
-          {isLong ? 'L' : 'S'}
-        </span>
-        <span className="text-[10px] text-purple-400 font-mono">{position.leverage}x</span>
-      </div>
-
-      {/* Center: Size */}
-      <div className="text-gray-400 font-mono">
-        ${position.size_fakeusd.toLocaleString()}
-      </div>
-
-      {/* Right: PnL & Close */}
-      <div className="flex items-center gap-3">
-        <div className={`font-mono font-bold ${isProfitable ? 'text-green-400' : 'text-red-400'}`}>
-          {isProfitable ? '+' : ''}{position.unrealizedPnL.toFixed(2)}
-          <span className="text-[10px] ml-1 opacity-70">
-            ({isProfitable ? '+' : ''}{position.pnlPercent.toFixed(1)}%)
+      {/* Top Row: Symbol, Direction, Leverage, PnL, Close */}
+      <div className="flex items-center justify-between">
+        {/* Left: Symbol & Direction */}
+        <div className="flex items-center gap-2">
+          {isLong ? (
+            <TrendingUp className="w-3 h-3 text-green-500" />
+          ) : (
+            <TrendingDown className="w-3 h-3 text-red-500" />
+          )}
+          <span className="font-bold text-white">{position.symbol}</span>
+          <span className={`font-mono text-[10px] ${isLong ? 'text-green-400' : 'text-red-400'}`}>
+            {isLong ? 'L' : 'S'}
+          </span>
+          <span className="text-[10px] text-purple-400 font-mono">{position.leverage}x</span>
+          <span className="text-[10px] text-gray-500 font-mono">
+            ${position.size_fakeusd.toLocaleString()}
           </span>
         </div>
-        <button
-          onClick={() => onClose(position.id, position.currentPrice)}
-          disabled={isClosing}
-          className="p-1 hover:bg-red-600 rounded transition-colors disabled:opacity-50"
-        >
-          {isClosing ? (
-            <Loader2 className="w-3 h-3 animate-spin" />
-          ) : (
-            <X className="w-3 h-3 text-gray-400 hover:text-white" />
-          )}
-        </button>
+
+        {/* Right: PnL & Close */}
+        <div className="flex items-center gap-3">
+          <div className={`font-mono font-bold ${isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+            {isProfitable ? '+' : ''}{position.unrealizedPnL.toFixed(2)}
+            <span className="text-[10px] ml-1 opacity-70">
+              ({isProfitable ? '+' : ''}{position.pnlPercent.toFixed(1)}%)
+            </span>
+          </div>
+          <button
+            onClick={() => onClose(position.id, position.currentPrice)}
+            disabled={isClosing}
+            className="p-1 hover:bg-red-600 rounded transition-colors disabled:opacity-50"
+          >
+            {isClosing ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <X className="w-3 h-3 text-gray-400 hover:text-white" />
+            )}
+          </button>
+        </div>
+      </div>
+      
+      {/* Bottom Row: Entry, Current, SL/TP */}
+      <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-gray-500">
+        <span>
+          Entry: <span className="text-gray-300">${position.entry_price.toFixed(5)}</span>
+        </span>
+        <span>→</span>
+        <span>
+          Now: <span className={isProfitable ? 'text-green-400' : 'text-red-400'}>${position.currentPrice.toFixed(5)}</span>
+        </span>
+        {position.stop_loss && (
+          <span className="text-red-400">
+            SL: ${position.stop_loss.toFixed(5)}
+          </span>
+        )}
+        {position.take_profit && (
+          <span className="text-green-400">
+            TP: ${position.take_profit.toFixed(5)}
+          </span>
+        )}
       </div>
     </div>
   );

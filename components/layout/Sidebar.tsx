@@ -90,9 +90,46 @@ export function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 
   useEffect(() => {
     fetchTradingBalance();
-    // Refresh trading balance every 10 seconds
-    const interval = setInterval(fetchTradingBalance, 10000);
-    return () => clearInterval(interval);
+    // Refresh trading balance every 5 seconds as backup
+    const interval = setInterval(fetchTradingBalance, 5000);
+    
+    // Subscribe to realtime balance updates for instant feedback
+    let subscription: ReturnType<typeof supabase.channel> | null = null;
+    
+    const setupRealtimeSubscription = async () => {
+      if (!address || !isSupabaseConfigured || !supabase) return;
+      
+      // Get user ID for subscription filter
+      const { data: user } = await supabase
+        .from('users')
+        .select('id')
+        .eq('wallet_address', address)
+        .single();
+      
+      if (user) {
+        subscription = supabase
+          .channel(`balance-${user.id}`)
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'user_balances',
+            filter: `user_id=eq.${user.id}`
+          }, (payload) => {
+            // Update balance immediately when it changes
+            if (payload.new && 'amount' in payload.new) {
+              setTradingBalance(Number(payload.new.amount) || 0);
+            }
+          })
+          .subscribe();
+      }
+    };
+    
+    setupRealtimeSubscription();
+    
+    return () => {
+      clearInterval(interval);
+      subscription?.unsubscribe();
+    };
   }, [address]);
 
   const canClaim = canClaimData === true;

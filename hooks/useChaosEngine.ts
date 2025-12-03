@@ -132,23 +132,25 @@ export function useChaosEngine({
     };
   }, [symbol, globalChaos]);
 
-  // 2. Initialize History
+  // 2. Initialize History (always 1-second base candles)
   useEffect(() => {
     if (candles.length === 0 && currentPrice > 0) {
-      const history = generateInitialHistory(currentPrice, chaosLevel);
+      // Generate 1-second base candles - timeframe aggregation happens in chart
+      const history = generateInitialHistory(currentPrice, chaosLevel, 200, 1);
       setCandles(history);
       const last = history[history.length - 1];
       lastCandleRef.current = last;
     }
   }, [currentPrice, chaosLevel, candles.length]);
 
-  // 3. Live Updates (The Chaos Heartbeat) - Leader generates prices
+  // 3. Live Updates (The Chaos Heartbeat) - Generate 1-second base candles
   useEffect(() => {
     if (!lastCandleRef.current) return;
 
+    // Always generate 1-second candles - timeframe aggregation happens in chart
     const interval = setInterval(() => {
       const last = lastCandleRef.current!;
-      const nextTime = last.time + 1;
+      const nextTime = last.time + 1; // Always 1 second increment
       
       const next = generateNextCandle(last.close, chaosLevel, nextTime);
       
@@ -166,10 +168,10 @@ export function useChaosEngine({
         updatePriceInDb(next.close);
       }
       
-    }, intervalMs);
+    }, 1000); // Always 1-second ticks - aggregation to timeframes happens in chart
 
     return () => clearInterval(interval);
-  }, [chaosLevel, intervalMs, updatePriceInDb]);
+  }, [chaosLevel, updatePriceInDb]);
 
   return {
     candles,

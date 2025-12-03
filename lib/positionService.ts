@@ -36,23 +36,37 @@ export interface ClosePositionParams {
 
 /**
  * Calculate liquidation price based on position parameters
- * For longs: liq_price = entry_price * (1 - 1/leverage + maintenance_margin)
- * For shorts: liq_price = entry_price * (1 + 1/leverage - maintenance_margin)
- * Using 1% maintenance margin for simplicity
+ * 
+ * MORE GENEROUS than real exchanges to make the game more fun!
+ * 
+ * Real exchange formula: Entry × (1 - 1/leverage + maintenance)
+ * Our formula:           Entry × (1 - 1/leverage - buffer)
+ * 
+ * The buffer gives you EXTRA room before liquidation.
+ * 
+ * Examples at $1.00 entry with 2% buffer:
+ * - 5x Long:  liq at $0.78 (22% room) vs real ~20%
+ * - 10x Long: liq at $0.88 (12% room) vs real ~9.5%
+ * - 20x Long: liq at $0.93 (7% room)  vs real ~4.5%
+ * - 50x Long: liq at $0.96 (4% room)  vs real ~1.5%
  */
 export function calculateLiquidationPrice(
   entryPrice: number,
   leverage: number,
   side: 'long' | 'short'
 ): number {
-  const maintenanceMargin = 0.01; // 1% maintenance margin
+  // 2% generous buffer - gives MORE room than real exchanges
+  // This makes the game more forgiving and fun
+  const generousBuffer = 0.02;
   
   if (side === 'long') {
     // Long position liquidates when price drops
-    return entryPrice * (1 - (1 / leverage) + maintenanceMargin);
+    // We SUBTRACT the buffer to give MORE room before liquidation
+    return entryPrice * (1 - (1 / leverage) - generousBuffer);
   } else {
     // Short position liquidates when price rises
-    return entryPrice * (1 + (1 / leverage) - maintenanceMargin);
+    // We ADD the buffer to give MORE room before liquidation
+    return entryPrice * (1 + (1 / leverage) + generousBuffer);
   }
 }
 
@@ -222,6 +236,29 @@ export async function closePosition(params: ClosePositionParams): Promise<{ succ
     console.error('Failed to close position:', error);
     return { success: false, error: error.message };
   }
+
+  // Return margin + PnL to user's balance
+  // Margin is returned, plus any profit (or minus any loss)
+  const returnAmount = position.size_fakeusd + realizedPnL;
+  
+  // Fetch current balance
+  const { data: currentBalance } = await supabase
+    .from('user_balances')
+    .select('amount')
+    .eq('user_id', position.user_id)
+    .eq('symbol', 'FAKEUSD')
+    .maybeSingle();
+  
+  const newBalance = (Number(currentBalance?.amount) || 0) + returnAmount;
+  
+  // Update balance
+  await supabase.from('user_balances').upsert({
+    user_id: position.user_id,
+    symbol: 'FAKEUSD',
+    amount: Math.max(0, newBalance), // Don't go below 0
+  }, { onConflict: 'user_id,symbol' });
+
+  console.log(`[CLOSE] Position ${params.positionId}: Margin ${position.size_fakeusd} + PnL ${realizedPnL.toFixed(2)} = ${returnAmount.toFixed(2)} returned. New balance: ${newBalance.toFixed(2)}`);
 
   // Record closing trade
   await supabase.from('trades').insert({
