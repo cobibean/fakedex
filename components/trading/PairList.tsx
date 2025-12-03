@@ -8,10 +8,22 @@ interface PairListProps {
   pairs: Pair[];
   selectedSymbol?: string;
   onSelectPair: (symbol: string) => void;
+  // Direct price from chart for the active symbol (bypasses realtime issues)
+  activePairPrice?: number;
 }
 
-export function PairList({ pairs, selectedSymbol, onSelectPair }: PairListProps) {
+export function PairList({ pairs, selectedSymbol, onSelectPair, activePairPrice }: PairListProps) {
   const { prices } = useAllPrices();
+
+  // Merge direct price with realtime prices - direct price takes priority for selected pair
+  const getPrice = (symbol: string): number | undefined => {
+    // For the selected pair, prefer the direct price from the chart
+    if (symbol === selectedSymbol && activePairPrice && activePairPrice > 0) {
+      return activePairPrice;
+    }
+    // Otherwise use realtime price
+    return prices[symbol];
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -23,7 +35,7 @@ export function PairList({ pairs, selectedSymbol, onSelectPair }: PairListProps)
           <PairRow 
             key={pair.symbol} 
             pair={pair}
-            currentPrice={prices[pair.symbol]}
+            currentPrice={getPrice(pair.symbol)}
             isSelected={pair.symbol === selectedSymbol}
             onClick={() => onSelectPair(pair.symbol)}
           />

@@ -196,7 +196,12 @@ export default function Home() {
           style={{ width: sidebarWidth }}
         >
           <div className="flex-1 glass-panel rounded-xl border border-gray-800 overflow-hidden">
-            <PairList pairs={pairs} selectedSymbol={activeSymbol} onSelectPair={setActiveSymbol} />
+            <PairList 
+              pairs={pairs} 
+              selectedSymbol={activeSymbol} 
+              onSelectPair={setActiveSymbol}
+              activePairPrice={currentPrice}
+            />
           </div>
           
           {/* Resize Handle */}
