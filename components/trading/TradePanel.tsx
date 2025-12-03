@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useActiveAccount } from "thirdweb/react";
-import { Loader2, Wallet, TrendingUp, Zap } from 'lucide-react';
-import { useFakeDexSwapPreview, useFakeDexSwap } from '@/hooks/useFakeDexContracts';
+import { Loader2, Wallet, TrendingUp, Zap, AlertTriangle } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
+import { openPosition, calculateLiquidationPrice } from '@/lib/positionService';
 
 interface TradePanelProps {
     symbol: string;
@@ -16,12 +16,49 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
     const account = useActiveAccount();
     const [amount, setAmount] = useState<string>('');
     const [leverage, setLeverage] = useState<number>(1);
-    const [side, setSide] = useState<'buy' | 'sell'>('buy');
+    const [side, setSide] = useState<'long' | 'short'>('long');
     const [loading, setLoading] = useState(false);
+    const [userId, setUserId] = useState<string | null>(null);
+    const [balance, setBalance] = useState<number>(0);
 
-    // Hooks
-    const { data: preview, isLoading: previewLoading } = useFakeDexSwapPreview(amount, symbol, currentPrice, leverage);
-    const { swapAsync } = useFakeDexSwap();
+    // Fetch user ID and balance
+    useEffect(() => {
+        if (!account?.address || !isSupabaseConfigured || !supabase) return;
+
+        const fetchUserData = async () => {
+            const { data: user } = await supabase
+                .from('users')
+                .select('id')
+                .eq('wallet_address', account.address)
+                .single();
+            
+            if (user) {
+                setUserId(user.id);
+                
+                // Fetch balance
+                const { data: balanceData } = await supabase
+                    .from('user_balances')
+                    .select('amount')
+                    .eq('user_id', user.id)
+                    .eq('symbol', 'FAKEUSD')
+                    .single();
+                
+                setBalance(Number(balanceData?.amount || 0));
+            }
+        };
+
+        fetchUserData();
+    }, [account?.address]);
+
+    // Calculate preview values
+    const amountNum = parseFloat(amount) || 0;
+    const positionSize = amountNum * leverage;
+    const liquidationPrice = amountNum > 0 
+        ? calculateLiquidationPrice(currentPrice, leverage, side)
+        : 0;
+    const liqDistance = amountNum > 0
+        ? Math.abs((liquidationPrice - currentPrice) / currentPrice * 100)
+        : 0;
 
     if (!account?.address) {
         return (
@@ -40,84 +77,46 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
     }
 
     const handleTrade = async () => {
-        if (!account?.address) {
-            alert("Connect wallet to trade!");
+        if (!userId) {
+            alert("User not found. Try refreshing the page.");
             return;
         }
-        if (!isSupabaseConfigured || !supabase) {
-            alert("Configure Supabase to enable trading.");
+        if (!amount || amountNum <= 0) return;
+        if (amountNum > balance) {
+            alert("Insufficient balance. Claim from the faucet!");
             return;
         }
-        if (!amount || parseFloat(amount) <= 0) return;
 
         setLoading(true);
 
         try {
-            // 1. Simulate Contract Call
-            await swapAsync({
+            // Open position
+            const result = await openPosition({
+                userId,
                 symbol,
                 side,
-                amount: parseFloat(amount),
+                size: amountNum,
                 leverage,
-                price: currentPrice
+                entryPrice: currentPrice,
             });
 
-            // 2. Get User ID
-            const { data: user } = await supabase.from('users').select('id').eq('wallet_address', account.address).single();
-            if (!user) throw new Error("User not found");
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to open position');
+            }
 
-            // 3. Insert Trade into Supabase
-            const { error: tradeError } = await supabase.from('trades').insert({
-                user_id: user.id,
-                symbol,
-                side,
-                size_fakeusd: parseFloat(amount) * leverage,
-                price: currentPrice,
-                leverage,
-                is_bot: false
-            });
-            
-            if (tradeError) throw tradeError;
-
-            // 4. Update Mock Balances (Optimistic-ish)
-            // Deduct FAKEUSD
-            // Note: Real app would verify balance first. V1 assumes infinite money glitch (or relies on Faucet).
-            const { data: currentBalance } = await supabase
+            // Deduct margin from balance
+            const newBalance = balance - amountNum;
+            await supabase
                 .from('user_balances')
-                .select('amount')
-                .eq('user_id', user.id)
-                .eq('symbol', 'FAKEUSD')
-                .single();
-            
-            const newUsdBalance = (Number(currentBalance?.amount || 0) - parseFloat(amount));
-            
-            await supabase.from('user_balances').upsert({
-                 user_id: user.id,
-                 symbol: 'FAKEUSD',
-                 amount: newUsdBalance
-            }, { onConflict: 'user_id, symbol' });
+                .upsert({
+                    user_id: userId,
+                    symbol: 'FAKEUSD',
+                    amount: newBalance
+                }, { onConflict: 'user_id, symbol' });
 
-            // Add Position/Token (Simplified: just storing token balance for now, not complex positions)
-            // In a real perp dex, this is a position. Here we simulate buying the token spot-ish.
-            const tokenAmount = preview?.estimatedOutput || 0;
-            
-             const { data: tokenBalance } = await supabase
-                .from('user_balances')
-                .select('amount')
-                .eq('user_id', user.id)
-                .eq('symbol', symbol)
-                .single();
-                
-            const newTokenBalance = (Number(tokenBalance?.amount || 0) + (side === 'buy' ? tokenAmount : -tokenAmount));
-
-            await supabase.from('user_balances').upsert({
-                 user_id: user.id,
-                 symbol: symbol,
-                 amount: newTokenBalance
-            }, { onConflict: 'user_id, symbol' });
-
-            alert(`Successfully ${side === 'buy' ? 'Longed' : 'Short'} ${symbol}!`);
+            setBalance(newBalance);
             setAmount('');
+            
             if (onTradeSuccess) onTradeSuccess();
 
         } catch (err) {
@@ -137,14 +136,14 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                  </h3>
                  <div className="flex bg-gray-900 rounded p-1 gap-1">
                     <button 
-                        onClick={() => setSide('buy')}
-                        className={`px-3 py-1 text-xs font-bold rounded transition-colors ${side === 'buy' ? 'bg-green-500 text-black' : 'text-gray-500 hover:bg-gray-800'}`}
+                        onClick={() => setSide('long')}
+                        className={`px-3 py-1 text-xs font-bold rounded transition-colors ${side === 'long' ? 'bg-green-500 text-black' : 'text-gray-500 hover:bg-gray-800'}`}
                     >
                         LONG
                     </button>
                     <button 
-                        onClick={() => setSide('sell')}
-                        className={`px-3 py-1 text-xs font-bold rounded transition-colors ${side === 'sell' ? 'bg-red-500 text-black' : 'text-gray-500 hover:bg-gray-800'}`}
+                        onClick={() => setSide('short')}
+                        className={`px-3 py-1 text-xs font-bold rounded transition-colors ${side === 'short' ? 'bg-red-500 text-black' : 'text-gray-500 hover:bg-gray-800'}`}
                     >
                         SHORT
                     </button>
@@ -155,10 +154,10 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                 {/* Amount Input */}
                 <div className="bg-black/40 p-4 rounded-lg border border-gray-700 focus-within:border-green-500/50 transition-colors">
                     <div className="flex justify-between mb-2">
-                        <label className="text-xs text-gray-500 font-mono uppercase">Amount (FAKEUSD)</label>
+                        <label className="text-xs text-gray-500 font-mono uppercase">Margin (FAKEUSD)</label>
                         <span className="text-xs text-gray-500 flex items-center gap-1">
                             <Wallet className="w-3 h-3" />
-                            Balance: 1,000
+                            Balance: {balance.toLocaleString()}
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -171,13 +170,27 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                             className="w-full bg-transparent outline-none font-mono text-2xl text-white placeholder-gray-700" 
                         />
                     </div>
+                    {/* Quick amount buttons */}
+                    <div className="flex gap-2 mt-2">
+                        {[25, 50, 75, 100].map(pct => (
+                            <button
+                                key={pct}
+                                onClick={() => setAmount((balance * pct / 100).toFixed(2))}
+                                className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
+                            >
+                                {pct}%
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Leverage Slider */}
                 <div className="space-y-3">
                     <div className="flex justify-between text-xs">
                         <span className="text-gray-500">Leverage</span>
-                        <span className="text-accent-pink font-bold">{leverage}x</span>
+                        <span className={`font-bold ${leverage >= 50 ? 'text-red-400' : leverage >= 20 ? 'text-orange-400' : 'text-purple-400'}`}>
+                            {leverage}x
+                        </span>
                     </div>
                     <input 
                         type="range" 
@@ -193,26 +206,37 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                         <span>50x</span>
                         <span>100x</span>
                     </div>
+                    {leverage >= 50 && (
+                        <div className="flex items-center gap-1 text-xs text-orange-400">
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>High leverage = high risk of liquidation</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Preview Details */}
-                {amount && (
+                {amountNum > 0 && (
                     <div className="p-3 bg-gray-900/50 rounded border border-gray-800 space-y-2 text-xs font-mono">
                         <div className="flex justify-between">
-                            <span className="text-gray-500">Est. Output</span>
-                            <span className="text-white">
-                                {previewLoading ? '...' : `~${preview?.estimatedOutput.toFixed(2)} ${symbol}`}
-                            </span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-500">Price Impact</span>
-                            <span className={`${(preview?.priceImpact || 0) > 5 ? 'text-red-500' : 'text-green-500'}`}>
-                                {previewLoading ? '...' : `${(preview?.priceImpact || 0).toFixed(2)}%`}
-                            </span>
+                            <span className="text-gray-500">Position Size</span>
+                            <span className="text-white">${positionSize.toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-gray-500">Entry Price</span>
                             <span className="text-white">${currentPrice.toFixed(4)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-gray-500 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-orange-400" />
+                                Liquidation Price
+                            </span>
+                            <span className="text-orange-400">${liquidationPrice.toFixed(4)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-gray-500">Distance to Liq.</span>
+                            <span className={liqDistance < 5 ? 'text-red-400' : 'text-gray-400'}>
+                                {liqDistance.toFixed(2)}%
+                            </span>
                         </div>
                     </div>
                 )}
@@ -220,23 +244,23 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
                 {/* Action Button */}
                 <button 
                     onClick={handleTrade}
-                    disabled={loading || !amount || !account}
+                    disabled={loading || !amount || amountNum <= 0 || amountNum > balance}
                     className={`w-full py-4 font-bold text-sm uppercase tracking-wider rounded-lg shadow-lg transition-all flex items-center justify-center gap-2
-                        ${side === 'buy' 
+                        ${side === 'long' 
                             ? 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/20' 
                             : 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20'}
-                        ${(loading || !amount || !account) ? 'opacity-50 cursor-not-allowed grayscale' : ''}
+                        ${(loading || !amount || amountNum <= 0 || amountNum > balance) ? 'opacity-50 cursor-not-allowed grayscale' : ''}
                     `}
                 >
                     {loading ? (
                         <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            Confirming...
+                            Opening Position...
                         </>
                     ) : (
                         <>
                             <Zap className="w-4 h-4 fill-current" />
-                            {side === 'buy' ? 'Enter Long' : 'Enter Short'}
+                            {side === 'long' ? 'Open Long' : 'Open Short'}
                         </>
                     )}
                 </button>
@@ -245,4 +269,3 @@ export function TradePanel({ symbol, currentPrice, onTradeSuccess }: TradePanelP
         </div>
     );
 }
-

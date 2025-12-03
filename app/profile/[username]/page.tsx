@@ -5,14 +5,16 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import type { User as UserProfile, Achievement, Trade, Comment } from '@/lib/types';
 import { AchievementsGrid } from '@/components/xp/AchievementsGrid';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
-import { ProfileStats, generateMockStats } from '@/components/profile/ProfileStats';
+import { ProfileStats } from '@/components/profile/ProfileStats';
 import { TradeHistory } from '@/components/profile/TradeHistory';
 import { CommentSection } from '@/components/profile/CommentSection';
-import { Loader2, Trophy, History, MessageCircle, BarChart3 } from 'lucide-react';
+import { Loader2, Trophy, History, MessageCircle, BarChart3, Zap } from 'lucide-react';
 import { useActiveAccount } from 'thirdweb/react';
 import { DEFAULT_ACHIEVEMENTS } from '@/lib/mockData';
+import { calculateUserStats, DEFAULT_STATS, UserStats } from '@/lib/statsService';
+import { Position } from '@/lib/positionService';
 
-type TabType = 'stats' | 'trades' | 'achievements' | 'comments';
+type TabType = 'stats' | 'positions' | 'trades' | 'achievements' | 'comments';
 
 export default function ProfilePage() {
   const account = useActiveAccount();
@@ -20,10 +22,11 @@ export default function ProfilePage() {
   const [achievements, setAchievements] = useState<Achievement[]>(DEFAULT_ACHIEVEMENTS);
   const [earnedIds, setEarnedIds] = useState<Set<string>>(new Set());
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('stats');
-  const [stats, setStats] = useState({ trades: 0, volume: 0 });
+  const [userStats, setUserStats] = useState<UserStats>(DEFAULT_STATS);
 
   useEffect(() => {
     let ignore = false;
@@ -56,21 +59,31 @@ export default function ProfilePage() {
         if (userAch) setEarnedIds(new Set(userAch.map((ua) => ua.achievement_id)));
       }
 
-      // Fetch trades and stats
+      // Fetch data if user exists
       if (user) {
-        const { count, data: tradeData } = await supabase
+        // Fetch trades
+        const { data: tradeData } = await supabase
           .from('trades')
-          .select('*', { count: 'exact' })
+          .select('*')
           .eq('user_id', user.id)
           .eq('is_bot', false)
           .order('created_at', { ascending: false })
           .limit(50);
 
-        const vol = tradeData?.reduce((acc, t) => acc + Number(t.size_fakeusd), 0) || 0;
+        // Fetch positions
+        const { data: positionData } = await supabase
+          .from('positions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        // Calculate real stats
+        const stats = await calculateUserStats(user.id);
         
         if (!ignore) {
-          setStats({ trades: count || 0, volume: vol });
           setTrades(tradeData || []);
+          setPositions(positionData || []);
+          setUserStats(stats);
         }
       }
 
@@ -86,8 +99,6 @@ export default function ProfilePage() {
   const handleAddComment = async (content: string) => {
     if (!profile || !supabase) return;
     
-    // In a real app, this would insert into a comments table
-    // For now, we'll just add it locally
     const newComment: Comment = {
       id: Date.now().toString(),
       user_id: profile.id,
@@ -103,8 +114,12 @@ export default function ProfilePage() {
     setComments((prev) => [newComment, ...prev]);
   };
 
-  // Generate mock stats based on real data
-  const fullStats = generateMockStats(stats.trades, stats.volume);
+  // Calculate degen score
+  const degenScore = Math.min(100, Math.floor(
+    userStats.avgLeverage * 2 + 
+    userStats.totalTrades * 0.5 + 
+    userStats.liquidationCount * 5
+  ));
 
   if (!account) {
     return (
@@ -144,9 +159,13 @@ export default function ProfilePage() {
     );
   }
 
+  const openPositions = positions.filter(p => p.status === 'open');
+  const closedPositions = positions.filter(p => p.status !== 'open');
+
   const tabs = [
     { id: 'stats' as TabType, label: 'Stats', icon: <BarChart3 className="w-4 h-4" /> },
-    { id: 'trades' as TabType, label: 'Trades', icon: <History className="w-4 h-4" />, count: stats.trades },
+    { id: 'positions' as TabType, label: 'Positions', icon: <Zap className="w-4 h-4" />, count: openPositions.length },
+    { id: 'trades' as TabType, label: 'History', icon: <History className="w-4 h-4" />, count: closedPositions.length },
     { id: 'achievements' as TabType, label: 'Badges', icon: <Trophy className="w-4 h-4" />, count: earnedIds.size },
     { id: 'comments' as TabType, label: 'Wall', icon: <MessageCircle className="w-4 h-4" />, count: comments.length || 3 },
   ];
@@ -191,19 +210,23 @@ export default function ProfilePage() {
               <BarChart3 className="w-5 h-5 text-purple-500" />
               Trading Stats
             </h2>
-            <ProfileStats stats={fullStats} />
+            <ProfileStats stats={userStats} />
             
-            {/* Fun Degen Metrics */}
+            {/* Degen Score */}
             <div className="mt-8 p-4 bg-gradient-to-r from-purple-900/20 to-pink-900/20 rounded-xl border border-purple-500/20">
               <h3 className="text-sm font-bold text-purple-400 mb-3">🎰 Degen Score</h3>
               <div className="flex items-center gap-4">
                 <div className="text-5xl font-bold text-white">
-                  {Math.min(100, Math.floor(fullStats.avgLeverage * 3 + fullStats.totalTrades * 0.5))}
+                  {degenScore}
                 </div>
                 <div className="text-sm text-gray-400">
-                  <p>Based on leverage usage, trade frequency, and overall recklessness.</p>
+                  <p>Based on leverage usage, trade frequency, and liquidation count.</p>
                   <p className="text-purple-400 mt-1">
-                    {fullStats.avgLeverage >= 20 ? '⚠️ Certified degen behavior detected' : 'Room for more degeneracy'}
+                    {degenScore >= 80 
+                      ? '🔥 Maximum degen achieved' 
+                      : degenScore >= 50 
+                        ? '⚠️ Certified degen behavior detected' 
+                        : 'Room for more degeneracy'}
                   </p>
                 </div>
               </div>
@@ -211,13 +234,90 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {activeTab === 'positions' && (
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Zap className="w-5 h-5 text-yellow-500" />
+              Open Positions
+            </h2>
+            {openPositions.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <div className="text-4xl mb-2">📊</div>
+                <p className="font-mono">No open positions</p>
+                <p className="text-xs text-gray-600 mt-1">Open a trade from the dashboard</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {openPositions.map((pos) => (
+                  <div key={pos.id} className="p-4 bg-gray-900/50 rounded-lg border border-gray-800">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className={`text-sm font-bold ${pos.side === 'long' ? 'text-green-400' : 'text-red-400'}`}>
+                          {pos.side.toUpperCase()}
+                        </span>
+                        <span className="font-mono text-white">{pos.symbol}</span>
+                        <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
+                          {pos.leverage}x
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-mono text-white">${Number(pos.size).toLocaleString()}</div>
+                        <div className="text-xs text-gray-500">@ ${Number(pos.entry_price).toFixed(4)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'trades' && (
           <div className="space-y-4">
             <h2 className="text-xl font-bold flex items-center gap-2">
               <History className="w-5 h-5 text-blue-500" />
-              Trade History
+              Position History
             </h2>
-            <TradeHistory trades={trades} />
+            {closedPositions.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <div className="text-4xl mb-2">📉</div>
+                <p className="font-mono">No closed positions yet</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {closedPositions.map((pos) => {
+                  const isProfitable = Number(pos.realized_pnl) >= 0;
+                  return (
+                    <div key={pos.id} className="p-4 bg-gray-900/50 rounded-lg border border-gray-800">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            pos.status === 'liquidated' 
+                              ? 'bg-red-500/20 text-red-400' 
+                              : 'bg-gray-700 text-gray-400'
+                          }`}>
+                            {pos.status.toUpperCase()}
+                          </span>
+                          <span className={`text-sm font-bold ${pos.side === 'long' ? 'text-green-400' : 'text-red-400'}`}>
+                            {pos.side.toUpperCase()}
+                          </span>
+                          <span className="font-mono text-white">{pos.symbol}</span>
+                          <span className="text-xs text-gray-500">{pos.leverage}x</span>
+                        </div>
+                        <div className="text-right">
+                          <div className={`font-mono font-bold ${isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+                            {isProfitable ? '+' : ''}{Number(pos.realized_pnl).toFixed(2)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            ${Number(pos.entry_price).toFixed(4)} → ${Number(pos.exit_price).toFixed(4)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

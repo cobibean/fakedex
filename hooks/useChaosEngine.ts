@@ -1,32 +1,60 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import { useState, useEffect, useRef } from 'react';
+/* eslint-disable react-hooks/exhaustive-deps */
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { generateNextCandle, generateInitialHistory, Candle } from '@/lib/chaosEngine';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 
 interface UseChaosEngineOptions {
   symbol: string;
   initialPrice: number;
-  intervalMs?: number; // Default 1000ms for "live" feel
+  intervalMs?: number;
+  isLeader?: boolean; // If true, this client updates prices in Supabase
 }
 
-export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseChaosEngineOptions) {
+export function useChaosEngine({ 
+  symbol, 
+  initialPrice, 
+  intervalMs = 1000,
+  isLeader = false 
+}: UseChaosEngineOptions) {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [currentPrice, setCurrentPrice] = useState<number>(initialPrice);
-  const [chaosLevel, setChaosLevel] = useState<number>(0);
-  const [globalChaos, setGlobalChaos] = useState<number>(0);
+  const [chaosLevel, setChaosLevel] = useState<number>(50);
+  const [globalChaos, setGlobalChaos] = useState<number>(50);
   
-  // We use refs for mutable state accessed in intervals to avoid closure staleness
   const lastCandleRef = useRef<Candle | null>(null);
-  
-  // 1. Fetch Global Chaos & Pair Override
+  const isLeaderRef = useRef(isLeader);
+  const symbolRef = useRef(symbol);
+
+  // Update refs when props change
   useEffect(() => {
-    const fetchChaosConfig = async () => {
+    isLeaderRef.current = isLeader;
+    symbolRef.current = symbol;
+  }, [isLeader, symbol]);
+
+  // Update price in Supabase (only if leader)
+  const updatePriceInDb = useCallback(async (price: number) => {
+    if (!isLeaderRef.current || !isSupabaseConfigured || !supabase) return;
+    
+    try {
+      await supabase
+        .from('pairs')
+        .update({ current_price: price })
+        .eq('symbol', symbolRef.current);
+    } catch (error) {
+      console.error('Failed to update price in DB:', error);
+    }
+  }, []);
+
+  // 1. Fetch Global Chaos & Current Price
+  useEffect(() => {
+    const fetchConfig = async () => {
       if (!isSupabaseConfigured || !supabase) {
         setGlobalChaos(50);
         setChaosLevel(50);
         return;
       }
 
+      // Fetch settings
       const { data: settings } = await supabase
         .from('settings')
         .select('value')
@@ -36,35 +64,54 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
       const globalLevel = settings?.value?.level ?? 50;
       setGlobalChaos(globalLevel);
 
+      // Fetch pair data including current price
       const { data: pairData } = await supabase
         .from('pairs')
-        .select('chaos_override')
+        .select('chaos_override, current_price')
         .eq('symbol', symbol)
         .single();
       
       const override = pairData?.chaos_override;
-      
       setChaosLevel(override !== null && override !== undefined ? override : globalLevel);
+      
+      // Use current_price from DB if available
+      if (pairData?.current_price) {
+        setCurrentPrice(Number(pairData.current_price));
+      }
     };
 
-    fetchChaosConfig();
+    fetchConfig();
 
-    if (!isSupabaseConfigured || !supabase) {
-      return;
-    }
+    if (!isSupabaseConfigured || !supabase) return;
 
+    // Subscribe to realtime updates
     const subscription = supabase
-      .channel('chaos-updates')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'settings' }, (payload) => {
-         if (payload.new.key === 'global_chaos_level') {
-            const newGlobal = payload.new.value.level;
-            setGlobalChaos(newGlobal);
-            setChaosLevel((prev) => prev === globalChaos ? newGlobal : prev); 
-         }
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pairs', filter: `symbol=eq.${symbol}` }, (payload) => {
-          const newOverride = payload.new.chaos_override;
+      .channel(`price-updates-${symbol}`)
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'pairs',
+        filter: `symbol=eq.${symbol}`
+      }, (payload) => {
+        // Update price from DB (for non-leader clients)
+        if (!isLeaderRef.current && payload.new.current_price) {
+          setCurrentPrice(Number(payload.new.current_price));
+        }
+        // Update chaos override
+        const newOverride = payload.new.chaos_override;
+        if (newOverride !== undefined) {
           setChaosLevel(newOverride !== null ? newOverride : globalChaos);
+        }
+      })
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'settings' 
+      }, (payload) => {
+        if (payload.new.key === 'global_chaos_level') {
+          const newGlobal = payload.new.value.level;
+          setGlobalChaos(newGlobal);
+        }
       })
       .subscribe();
 
@@ -73,43 +120,44 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
     };
   }, [symbol, globalChaos]);
 
-
   // 2. Initialize History
   useEffect(() => {
-    if (candles.length === 0) {
-      const history = generateInitialHistory(initialPrice, chaosLevel);
+    if (candles.length === 0 && currentPrice > 0) {
+      const history = generateInitialHistory(currentPrice, chaosLevel);
       setCandles(history);
       const last = history[history.length - 1];
       lastCandleRef.current = last;
-      setCurrentPrice(last.close);
     }
-  }, [initialPrice, chaosLevel, candles.length]);
+  }, [currentPrice, chaosLevel, candles.length]);
 
-  // 3. Live Updates (The Chaos Heartbeat)
+  // 3. Live Updates (The Chaos Heartbeat) - Leader generates prices
   useEffect(() => {
     if (!lastCandleRef.current) return;
 
     const interval = setInterval(() => {
       const last = lastCandleRef.current!;
-      // Ensure each candle has a unique, strictly increasing timestamp
-      // Use the last candle's time + 1 second to guarantee ascending order
       const nextTime = last.time + 1;
       
       const next = generateNextCandle(last.close, chaosLevel, nextTime);
       
       setCandles((prev) => {
         const newHistory = [...prev, next];
-        if (newHistory.length > 200) newHistory.shift(); // Keep buffer manageable
+        if (newHistory.length > 200) newHistory.shift();
         return newHistory;
       });
       
       lastCandleRef.current = next;
       setCurrentPrice(next.close);
       
+      // Leader updates the price in DB
+      if (isLeaderRef.current) {
+        updatePriceInDb(next.close);
+      }
+      
     }, intervalMs);
 
     return () => clearInterval(interval);
-  }, [chaosLevel, intervalMs]);
+  }, [chaosLevel, intervalMs, updatePriceInDb]);
 
   return {
     candles,
@@ -119,3 +167,104 @@ export function useChaosEngine({ symbol, initialPrice, intervalMs = 1000 }: UseC
   };
 }
 
+// Hook to get current price for a symbol (for position PnL calculations)
+export function useCurrentPrice(symbol: string) {
+  const [price, setPrice] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchPrice = async () => {
+      const { data } = await supabase
+        .from('pairs')
+        .select('current_price')
+        .eq('symbol', symbol)
+        .single();
+      
+      if (data?.current_price) {
+        setPrice(Number(data.current_price));
+      }
+      setLoading(false);
+    };
+
+    fetchPrice();
+
+    // Subscribe to price updates
+    const subscription = supabase
+      .channel(`price-${symbol}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'pairs',
+        filter: `symbol=eq.${symbol}`
+      }, (payload) => {
+        if (payload.new.current_price) {
+          setPrice(Number(payload.new.current_price));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [symbol]);
+
+  return { price, loading };
+}
+
+// Hook to get all current prices
+export function useAllPrices() {
+  const [prices, setPrices] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchPrices = async () => {
+      const { data } = await supabase
+        .from('pairs')
+        .select('symbol, current_price');
+      
+      if (data) {
+        const priceMap: Record<string, number> = {};
+        data.forEach(pair => {
+          priceMap[pair.symbol] = Number(pair.current_price) || 0;
+        });
+        setPrices(priceMap);
+      }
+      setLoading(false);
+    };
+
+    fetchPrices();
+
+    // Subscribe to all price updates
+    const subscription = supabase
+      .channel('all-prices')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'pairs'
+      }, (payload) => {
+        if (payload.new.current_price && payload.new.symbol) {
+          setPrices(prev => ({
+            ...prev,
+            [payload.new.symbol]: Number(payload.new.current_price)
+          }));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  return { prices, loading };
+}
