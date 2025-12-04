@@ -29,3 +29,21 @@ export function shortenAddress(address: string, chars = 4): string {
   return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;
 }
 
+/**
+ * Smart price formatter that handles very small numbers (like DEGEN at 0.0000001)
+ * and normal prices appropriately
+ */
+export function formatPrice(price: number): string {
+  if (price === 0 || isNaN(price)) return '0.00000';
+  if (price >= 0.01) return price.toFixed(5);
+  if (price >= 0.00001) return price.toFixed(7);
+  // For very small prices, show significant digits
+  const str = price.toFixed(12);
+  // Find first non-zero digit after decimal and show 4 more digits
+  const match = str.match(/^0\.(0*)([1-9]\d{0,3})/);
+  if (match) {
+    return `0.${match[1]}${match[2]}`;
+  }
+  return price.toExponential(2);
+}
+

@@ -1,4 +1,5 @@
 import { Pair } from '@/lib/types';
+import { formatPrice } from '@/lib/utils';
 import { clsx } from 'clsx';
 import { ArrowUp, ArrowDown, Minus } from 'lucide-react';
 
@@ -35,7 +36,7 @@ export function PairRow({ pair, currentPrice, isSelected, onClick }: PairRowProp
       </div>
       
       <div className="text-right">
-        <div className="font-mono text-sm text-gray-300">${displayPrice.toFixed(5)}</div>
+        <div className="font-mono text-sm text-gray-300">${formatPrice(displayPrice)}</div>
         <div className={clsx(
           "text-xs font-mono flex items-center justify-end gap-1", 
           isFlat ? "text-gray-500" : isGreen ? "text-green-500" : "text-red-500"

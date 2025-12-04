@@ -14,6 +14,7 @@ import { useChaosEngine } from '@/hooks/useChaosEngine';
 import { useBotTrades } from '@/hooks/useBotTrades';
 import { useXP } from '@/hooks/useXP';
 import { usePositions } from '@/hooks/usePositions';
+import { formatPrice } from '@/lib/utils';
 
 // Get initial panel widths from localStorage or defaults
 const getInitialSidebarWidth = () => {
@@ -228,7 +229,7 @@ export default function Home() {
                 {activeSymbol} <span className="text-gray-500 text-xs">/ FAKEUSD</span>
               </h2>
               <div className="flex items-center gap-2">
-                <div className="font-mono text-lg text-green-400">${currentPrice.toFixed(5)}</div>
+                <div className="font-mono text-lg text-green-400">${formatPrice(currentPrice)}</div>
                 <Link
                   href={`/pair/${activeSymbol}`}
                   className="text-[10px] font-mono uppercase tracking-wide border border-gray-700 px-2 py-0.5 rounded-full text-gray-400 hover:text-white hover:border-green-500 transition-colors"

@@ -14,6 +14,7 @@ import { OrderFeed } from '@/components/trading/OrderFeed';
 import { TradePanel } from '@/components/trading/TradePanel';
 import { VicPanel } from '@/components/trading/VicPanel';
 import { DepthPanel } from '@/components/trading/DepthPanel';
+import { formatPrice } from '@/lib/utils';
 
 export default function PairTerminalPage() {
   const params = useParams<{ symbol: string }>();
@@ -65,7 +66,7 @@ export default function PairTerminalPage() {
         </div>
         <div className="text-right font-mono">
           <div className="text-xs text-gray-500 uppercase">Spot-ish Price</div>
-          <div className="text-3xl text-green-400 font-bold">${currentPrice.toFixed(5)}</div>
+          <div className="text-3xl text-green-400 font-bold">${formatPrice(currentPrice)}</div>
         </div>
       </div>
 
@@ -105,7 +106,7 @@ export default function PairTerminalPage() {
             </div>
             <div className="flex flex-wrap gap-3 text-xs font-mono uppercase tracking-wide">
               <span>Chaos Source: {isOverride ? 'Pair Override' : 'Global'}</span>
-              <span>Initial Price: ${initialPrice.toFixed(5)}</span>
+              <span>Initial Price: ${formatPrice(initialPrice)}</span>
               <span>Symbol: ${symbol}</span>
             </div>
             <p className="leading-relaxed">

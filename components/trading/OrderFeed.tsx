@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { Trade } from '@/lib/types';
 import { DEFAULT_TRADES } from '@/lib/mockData';
+import { formatPrice } from '@/lib/utils';
 
 export function OrderFeed({ activeSymbol }: { activeSymbol?: string }) {
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -66,7 +67,7 @@ export function OrderFeed({ activeSymbol }: { activeSymbol?: string }) {
                  <span className="text-gray-400 font-bold">${trade.symbol}</span>
                </div>
                <div className="flex gap-3 text-gray-500">
-                 <span>${Number(trade.price).toFixed(5)}</span>
+                 <span>${formatPrice(Number(trade.price))}</span>
                  <span className="w-16 text-right text-gray-600">{Number(trade.size_fakeusd).toLocaleString()}</span>
                </div>
             </div>
