@@ -7,18 +7,22 @@ interface UseChaosEngineOptions {
   symbol: string;
   initialPrice: number;
   intervalMs?: number;
-  isLeader?: boolean; // If true, this client TRIGGERS the server to generate candles
+  isLeader?: boolean; // DEPRECATED: Now uses smart coordination - any client can trigger
 }
 
 // Max candles to store - needs to be high enough for larger timeframes
 // 3600 = 1 hour of 1-second candles = 60 one-minute candles
 const MAX_CANDLES = 3600;
 
+// How many seconds since last candle before this client should trigger generation
+// This allows ANY client to become a "leader" if the system is stale
+const STALE_THRESHOLD_SECONDS = 2;
+
 export function useChaosEngine({ 
   symbol, 
   initialPrice, 
   intervalMs = 1000,
-  isLeader = false 
+  // isLeader is now ignored - we use smart coordination instead
 }: UseChaosEngineOptions) {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [currentPrice, setCurrentPrice] = useState<number>(initialPrice);
@@ -27,16 +31,15 @@ export function useChaosEngine({
   const [isInitialized, setIsInitialized] = useState(false);
   
   const lastCandleRef = useRef<Candle | null>(null);
-  const isLeaderRef = useRef(isLeader);
   const symbolRef = useRef(symbol);
   const previousSymbolRef = useRef(symbol);
   const pendingLocalCandle = useRef<Candle | null>(null);
+  const lastGenerationAttemptRef = useRef<number>(0);
 
   // Update refs when props change
   useEffect(() => {
-    isLeaderRef.current = isLeader;
     symbolRef.current = symbol;
-  }, [isLeader, symbol]);
+  }, [symbol]);
 
   // Reset when symbol changes
   useEffect(() => {
@@ -364,40 +367,76 @@ export function useChaosEngine({
     };
   }, [symbol]);
 
-  // 4. Leader triggers server-side candle generation every second
-  // Also generates local candle for instant display (hybrid mode)
+  /**
+   * Check if the system needs candle generation (stale check)
+   * Any client can become a "leader" if candles are stale
+   */
+  const checkAndTriggerGeneration = useCallback(async () => {
+    if (!isSupabaseConfigured || !supabase) return false;
+    
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Debounce: don't attempt more than once per second
+    if (now - lastGenerationAttemptRef.current < 1) return false;
+    
+    // Check when the last candle was generated for ANY pair
+    const { data: pairs } = await supabase
+      .from('pairs')
+      .select('last_candle_time')
+      .order('last_candle_time', { ascending: false })
+      .limit(1);
+    
+    const lastCandleTime = pairs?.[0]?.last_candle_time || 0;
+    const timeSinceLastCandle = now - lastCandleTime;
+    
+    // If candles are stale (no one has generated recently), this client takes over
+    if (timeSinceLastCandle >= STALE_THRESHOLD_SECONDS) {
+      lastGenerationAttemptRef.current = now;
+      return true; // We should trigger
+    }
+    
+    return false; // Someone else is generating
+  }, []);
+
+  // 4. Smart coordination: ANY client can trigger generation if system is stale
+  // This ensures candles always generate as long as at least one client is connected
   useEffect(() => {
     if (!isInitialized) return;
-    if (!isLeaderRef.current) return; // Only leader triggers server
+    if (!isSupabaseConfigured || !supabase) return;
 
     const interval = setInterval(async () => {
-      // Generate local candle for instant display
-      const localCandle = generateLocalCandle();
-      if (localCandle) {
-        pendingLocalCandle.current = localCandle;
-        
-        // Add local candle to display immediately
-        setCandles((prev) => {
-          // Don't add if we already have a candle for this time
-          if (prev.some(c => c.time === localCandle.time)) return prev;
-          const newHistory = [...prev, localCandle];
-          if (newHistory.length > MAX_CANDLES) newHistory.shift();
-          return newHistory;
-        });
-        
-        lastCandleRef.current = localCandle;
-        setCurrentPrice(localCandle.close);
-      }
+      // Check if we should be the one to generate (smart coordination)
+      const shouldGenerate = await checkAndTriggerGeneration();
       
-      // Trigger server to generate canonical candle
-      // This will arrive via realtime subscription and replace local candle
-      // If Edge Function fails, it will fall back to saving local candle directly
-      await triggerServerCandleGeneration(localCandle);
+      if (shouldGenerate) {
+        // Generate local candle for instant display
+        const localCandle = generateLocalCandle();
+        if (localCandle) {
+          pendingLocalCandle.current = localCandle;
+          
+          // Add local candle to display immediately
+          setCandles((prev) => {
+            // Don't add if we already have a candle for this time
+            if (prev.some(c => c.time === localCandle.time)) return prev;
+            const newHistory = [...prev, localCandle];
+            if (newHistory.length > MAX_CANDLES) newHistory.shift();
+            return newHistory;
+          });
+          
+          lastCandleRef.current = localCandle;
+          setCurrentPrice(localCandle.close);
+        }
+        
+        // Trigger server to generate canonical candle for ALL pairs
+        // This will arrive via realtime subscription and replace local candle
+        // If Edge Function fails, it will fall back to saving local candle directly
+        await triggerServerCandleGeneration(localCandle);
+      }
       
     }, intervalMs);
 
     return () => clearInterval(interval);
-  }, [chaosLevel, isInitialized, intervalMs, generateLocalCandle, triggerServerCandleGeneration]);
+  }, [chaosLevel, isInitialized, intervalMs, generateLocalCandle, triggerServerCandleGeneration, checkAndTriggerGeneration]);
 
   return {
     candles,

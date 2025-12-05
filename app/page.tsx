@@ -129,7 +129,6 @@ export default function Home() {
   const { candles, currentPrice, chaosLevel, isOverride } = useChaosEngine({
     symbol: activeSymbol || pairs[0]?.symbol || 'SHIT',
     initialPrice: currentPair?.initial_price || 1,
-    isLeader: true,
   });
 
   // Fetch aggregated candles when a longer timeframe is selected
