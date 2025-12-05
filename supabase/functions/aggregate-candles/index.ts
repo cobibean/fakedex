@@ -1,6 +1,7 @@
 // Supabase Edge Function: Candle Aggregator
 // Runs via cron every minute to aggregate 1-second candles into larger timeframes
 // and clean up old data based on retention policies
+// Now includes backfill logic to process all available historical data
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -18,6 +19,9 @@ const TIMEFRAMES = [
 // Raw 1-second candles retention (1 hour)
 const RAW_CANDLE_RETENTION_SECONDS = 3600;
 
+// Max buckets to process per run (to avoid timeouts)
+const MAX_BUCKETS_PER_RUN = 100;
+
 interface Candle {
   time: number;
   open: number;
@@ -25,11 +29,6 @@ interface Candle {
   low: number;
   close: number;
   volume: number;
-}
-
-interface AggregatedCandle extends Candle {
-  symbol: string;
-  timeframe: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -55,9 +54,9 @@ Deno.serve(async (req: Request) => {
 
     // Process each symbol
     for (const symbol of symbols) {
-      // Aggregate candles for each timeframe
+      // Aggregate candles for each timeframe (with backfill)
       for (const tf of TIMEFRAMES) {
-        const aggregated = await aggregateTimeframe(supabase, symbol, tf, now);
+        const aggregated = await aggregateTimeframeWithBackfill(supabase, symbol, tf, now);
         results.aggregated += aggregated;
       }
     }
@@ -110,126 +109,220 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function aggregateTimeframe(
+/**
+ * Aggregate all available time buckets for a symbol/timeframe, including backfill
+ */
+async function aggregateTimeframeWithBackfill(
   supabase: ReturnType<typeof createClient>,
   symbol: string,
   tf: { name: string; seconds: number; retentionDays: number },
   now: number
 ): Promise<number> {
-  // Calculate the current bucket and the one we should aggregate
-  // We aggregate the PREVIOUS completed bucket, not the current one
-  const currentBucket = Math.floor(now / tf.seconds) * tf.seconds;
-  const previousBucket = currentBucket - tf.seconds;
+  // For 1m timeframe, aggregate from raw candles
+  // For larger timeframes, we can aggregate from smaller aggregated candles
+  
+  if (tf.name === '1m') {
+    return await aggregateFromRawCandles(supabase, symbol, tf, now);
+  } else {
+    return await aggregateFromSmallerTimeframe(supabase, symbol, tf, now);
+  }
+}
 
-  // Check if we already have this aggregated candle
-  const { data: existing } = await supabase
+/**
+ * Aggregate 1m candles from raw 1-second candles (with backfill)
+ */
+async function aggregateFromRawCandles(
+  supabase: ReturnType<typeof createClient>,
+  symbol: string,
+  tf: { name: string; seconds: number; retentionDays: number },
+  now: number
+): Promise<number> {
+  // Get the time range of available raw candles
+  const { data: timeRange, error: rangeError } = await supabase
+    .from('candles')
+    .select('time')
+    .eq('symbol', symbol)
+    .order('time', { ascending: true })
+    .limit(1);
+
+  if (rangeError || !timeRange || timeRange.length === 0) {
+    return 0;
+  }
+
+  const oldestRawTime = timeRange[0].time;
+  const currentBucket = Math.floor(now / tf.seconds) * tf.seconds;
+  
+  // Start from the bucket containing the oldest raw candle
+  const startBucket = Math.floor(oldestRawTime / tf.seconds) * tf.seconds;
+  
+  // Get existing aggregated candles for this symbol/timeframe
+  const { data: existingCandles } = await supabase
     .from('candles_aggregated')
     .select('time')
     .eq('symbol', symbol)
-    .eq('timeframe', tf.name)
-    .eq('time', previousBucket)
-    .single();
-
-  if (existing) {
-    // Already aggregated
-    return 0;
-  }
-
-  // Fetch raw 1-second candles for this bucket
-  const { data: rawCandles, error } = await supabase
-    .from('candles')
-    .select('time, open, high, low, close, volume')
-    .eq('symbol', symbol)
-    .gte('time', previousBucket)
-    .lt('time', currentBucket)
-    .order('time', { ascending: true });
-
-  if (error) {
-    console.error(`Failed to fetch candles for ${symbol} ${tf.name}:`, error);
-    return 0;
-  }
-
-  if (!rawCandles || rawCandles.length === 0) {
-    // No candles to aggregate - check if we can build from smaller aggregated candles
-    // For example, 1h can be built from 1m candles
-    const aggregated = await aggregateFromSmallerTimeframe(supabase, symbol, tf, previousBucket, currentBucket);
-    if (aggregated) {
-      return 1;
+    .eq('timeframe', tf.name);
+  
+  const existingTimes = new Set(existingCandles?.map(c => c.time) || []);
+  
+  // Find buckets that need aggregation
+  const bucketsToProcess: number[] = [];
+  for (let bucket = startBucket; bucket < currentBucket && bucketsToProcess.length < MAX_BUCKETS_PER_RUN; bucket += tf.seconds) {
+    if (!existingTimes.has(bucket)) {
+      bucketsToProcess.push(bucket);
     }
+  }
+  
+  if (bucketsToProcess.length === 0) {
     return 0;
   }
-
-  // Aggregate the candles
-  const aggregatedCandle = aggregateCandles(rawCandles as Candle[], previousBucket);
-
-  // Upsert to candles_aggregated
-  const { error: upsertError } = await supabase
-    .from('candles_aggregated')
-    .upsert({
-      symbol,
-      timeframe: tf.name,
-      time: previousBucket,
-      open: aggregatedCandle.open,
-      high: aggregatedCandle.high,
-      low: aggregatedCandle.low,
-      close: aggregatedCandle.close,
-      volume: aggregatedCandle.volume,
-    }, { onConflict: 'symbol,timeframe,time' });
-
-  if (upsertError) {
-    console.error(`Failed to upsert ${symbol} ${tf.name}:`, upsertError);
-    return 0;
+  
+  let aggregatedCount = 0;
+  
+  // Process each bucket
+  for (const bucketStart of bucketsToProcess) {
+    const bucketEnd = bucketStart + tf.seconds;
+    
+    // Fetch raw candles for this bucket
+    const { data: rawCandles, error } = await supabase
+      .from('candles')
+      .select('time, open, high, low, close, volume')
+      .eq('symbol', symbol)
+      .gte('time', bucketStart)
+      .lt('time', bucketEnd)
+      .order('time', { ascending: true });
+    
+    if (error || !rawCandles || rawCandles.length === 0) {
+      continue;
+    }
+    
+    // Aggregate
+    const aggregatedCandle = aggregateCandles(rawCandles as Candle[], bucketStart);
+    
+    // Upsert
+    const { error: upsertError } = await supabase
+      .from('candles_aggregated')
+      .upsert({
+        symbol,
+        timeframe: tf.name,
+        time: bucketStart,
+        open: aggregatedCandle.open,
+        high: aggregatedCandle.high,
+        low: aggregatedCandle.low,
+        close: aggregatedCandle.close,
+        volume: aggregatedCandle.volume,
+      }, { onConflict: 'symbol,timeframe,time' });
+    
+    if (!upsertError) {
+      aggregatedCount++;
+    }
   }
-
-  return 1;
+  
+  return aggregatedCount;
 }
 
+/**
+ * Aggregate larger timeframes from smaller aggregated candles
+ */
 async function aggregateFromSmallerTimeframe(
   supabase: ReturnType<typeof createClient>,
   symbol: string,
-  tf: { name: string; seconds: number },
-  bucketStart: number,
-  bucketEnd: number
-): Promise<boolean> {
-  // Determine which smaller timeframe to use
-  let sourceTimeframe: string | null = null;
+  tf: { name: string; seconds: number; retentionDays: number },
+  now: number
+): Promise<number> {
+  // Determine source timeframe
+  let sourceTimeframe: string;
+  let sourceSeconds: number;
   
-  if (tf.name === '5m') sourceTimeframe = '1m';
-  else if (tf.name === '15m') sourceTimeframe = '5m';
-  else if (tf.name === '1h') sourceTimeframe = '15m';
-  else if (tf.name === '4h') sourceTimeframe = '1h';
-  else if (tf.name === '1d') sourceTimeframe = '4h';
-  else return false; // 1m must come from raw candles
-
-  const { data: sourceCandles, error } = await supabase
+  if (tf.name === '5m') { sourceTimeframe = '1m'; sourceSeconds = 60; }
+  else if (tf.name === '15m') { sourceTimeframe = '5m'; sourceSeconds = 300; }
+  else if (tf.name === '1h') { sourceTimeframe = '15m'; sourceSeconds = 900; }
+  else if (tf.name === '4h') { sourceTimeframe = '1h'; sourceSeconds = 3600; }
+  else if (tf.name === '1d') { sourceTimeframe = '4h'; sourceSeconds = 14400; }
+  else return 0;
+  
+  // Get the time range of available source candles
+  const { data: timeRange, error: rangeError } = await supabase
     .from('candles_aggregated')
-    .select('time, open, high, low, close, volume')
+    .select('time')
     .eq('symbol', symbol)
     .eq('timeframe', sourceTimeframe)
-    .gte('time', bucketStart)
-    .lt('time', bucketEnd)
-    .order('time', { ascending: true });
+    .order('time', { ascending: true })
+    .limit(1);
 
-  if (error || !sourceCandles || sourceCandles.length === 0) {
-    return false;
+  if (rangeError || !timeRange || timeRange.length === 0) {
+    return 0;
   }
 
-  const aggregatedCandle = aggregateCandles(sourceCandles as Candle[], bucketStart);
-
-  const { error: upsertError } = await supabase
+  const oldestSourceTime = timeRange[0].time;
+  const currentBucket = Math.floor(now / tf.seconds) * tf.seconds;
+  
+  // Start from the bucket containing the oldest source candle
+  const startBucket = Math.floor(oldestSourceTime / tf.seconds) * tf.seconds;
+  
+  // Get existing aggregated candles for this symbol/timeframe
+  const { data: existingCandles } = await supabase
     .from('candles_aggregated')
-    .upsert({
-      symbol,
-      timeframe: tf.name,
-      time: bucketStart,
-      open: aggregatedCandle.open,
-      high: aggregatedCandle.high,
-      low: aggregatedCandle.low,
-      close: aggregatedCandle.close,
-      volume: aggregatedCandle.volume,
-    }, { onConflict: 'symbol,timeframe,time' });
-
-  return !upsertError;
+    .select('time')
+    .eq('symbol', symbol)
+    .eq('timeframe', tf.name);
+  
+  const existingTimes = new Set(existingCandles?.map(c => c.time) || []);
+  
+  // Find buckets that need aggregation
+  const bucketsToProcess: number[] = [];
+  for (let bucket = startBucket; bucket < currentBucket && bucketsToProcess.length < MAX_BUCKETS_PER_RUN; bucket += tf.seconds) {
+    if (!existingTimes.has(bucket)) {
+      bucketsToProcess.push(bucket);
+    }
+  }
+  
+  if (bucketsToProcess.length === 0) {
+    return 0;
+  }
+  
+  let aggregatedCount = 0;
+  
+  // Process each bucket
+  for (const bucketStart of bucketsToProcess) {
+    const bucketEnd = bucketStart + tf.seconds;
+    
+    // Fetch source candles for this bucket
+    const { data: sourceCandles, error } = await supabase
+      .from('candles_aggregated')
+      .select('time, open, high, low, close, volume')
+      .eq('symbol', symbol)
+      .eq('timeframe', sourceTimeframe)
+      .gte('time', bucketStart)
+      .lt('time', bucketEnd)
+      .order('time', { ascending: true });
+    
+    if (error || !sourceCandles || sourceCandles.length === 0) {
+      continue;
+    }
+    
+    // Aggregate
+    const aggregatedCandle = aggregateCandles(sourceCandles as Candle[], bucketStart);
+    
+    // Upsert
+    const { error: upsertError } = await supabase
+      .from('candles_aggregated')
+      .upsert({
+        symbol,
+        timeframe: tf.name,
+        time: bucketStart,
+        open: aggregatedCandle.open,
+        high: aggregatedCandle.high,
+        low: aggregatedCandle.low,
+        close: aggregatedCandle.close,
+        volume: aggregatedCandle.volume,
+      }, { onConflict: 'symbol,timeframe,time' });
+    
+    if (!upsertError) {
+      aggregatedCount++;
+    }
+  }
+  
+  return aggregatedCount;
 }
 
 function aggregateCandles(candles: Candle[], bucketTime: number): Candle {
@@ -249,4 +342,3 @@ function aggregateCandles(candles: Candle[], bucketTime: number): Candle {
     volume: sorted.reduce((sum, c) => sum + Number(c.volume), 0),
   };
 }
-
