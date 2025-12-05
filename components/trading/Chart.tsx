@@ -265,19 +265,14 @@ export function Chart({
       userScrolledAwayRef.current = false;
 
       // Detect when user manually scrolls/pans the chart
+      // ANY user interaction with the time scale disables auto-scroll
       chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
         // Skip if we're programmatically updating data
         if (isUpdatingDataRef.current) return;
         
-        // User is interacting with the chart - check if they scrolled away from right edge
-        const visibleRange = chart.timeScale().getVisibleLogicalRange();
-        if (visibleRange && lastDataLengthRef.current > 0) {
-          // If visible range doesn't include the latest candles, user has scrolled away
-          const isAtRightEdge = visibleRange.to >= lastDataLengthRef.current - 2;
-          if (!isAtRightEdge) {
-            userScrolledAwayRef.current = true;
-          }
-        }
+        // User is interacting with the chart - disable auto-scroll
+        // They can re-enable it by clicking "Fit Content" or "Reset View"
+        userScrolledAwayRef.current = true;
       });
 
       return () => {
