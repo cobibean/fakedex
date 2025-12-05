@@ -1,14 +1,21 @@
 import pkg from "hardhat";
 const { ethers } = pkg;
 
-// Configuration - update these as needed
-const TFAKEUSD_ADDRESS = process.env.NEXT_PUBLIC_TFAKEUSD_ADDRESS || "0xd0DF684Ef778b4b13A2307087C6265396CE80cCb";
-// Backend signer - this should be a dedicated key for signing withdrawals
-// For now, using deployer as backend signer (update in production)
+// Configuration - must be set via environment variables
+// NEXT_PUBLIC_TFAKEUSD_ADDRESS: Address of deployed tFAKEUSD contract
+// BACKEND_SIGNER_ADDRESS: Address that will sign withdrawal approvals (optional, defaults to deployer)
+const TFAKEUSD_ADDRESS = process.env.NEXT_PUBLIC_TFAKEUSD_ADDRESS;
 const BACKEND_SIGNER = process.env.BACKEND_SIGNER_ADDRESS || ""; // Will use deployer if empty
 
 async function main() {
   console.log("Deploying FakeDexEscrow to Sepolia...\n");
+
+  // Validate required configuration
+  if (!TFAKEUSD_ADDRESS) {
+    console.error("ERROR: NEXT_PUBLIC_TFAKEUSD_ADDRESS environment variable is required!");
+    console.log("Deploy tFAKEUSD first using: npx hardhat run scripts/deploy.ts --network sepolia");
+    process.exit(1);
+  }
 
   // Get the deployer account
   const [deployer] = await ethers.getSigners();

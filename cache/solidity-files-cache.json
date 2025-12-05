@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/Users/cobibean/DEV/fakedex/contracts/tFAKEUSD.sol": {
-      "lastModificationDate": 1764729176794,
-      "contentHash": "03043dedc89e21f75ac4384b0a0d8831",
+      "lastModificationDate": 1764913200260,
+      "contentHash": "53831c576b604ba592a7e181470eb63c",
       "sourceName": "contracts/tFAKEUSD.sol",
       "solcConfig": {
         "version": "0.8.20",

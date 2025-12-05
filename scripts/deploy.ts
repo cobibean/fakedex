@@ -1,6 +1,13 @@
 import pkg from "hardhat";
 const { ethers } = pkg;
 
+// Configuration: Add addresses to whitelist on deployment
+// These addresses will have unlimited minting privileges
+// Set via environment variable (comma-separated) or leave empty for deployer-only
+const INITIAL_WHITELIST = process.env.INITIAL_WHITELIST_ADDRESSES
+  ? process.env.INITIAL_WHITELIST_ADDRESSES.split(",").map(addr => addr.trim()).filter(addr => addr)
+  : [];
+
 async function main() {
   console.log("Deploying tFAKEUSD to Sepolia...\n");
 
@@ -18,9 +25,20 @@ async function main() {
     process.exit(1);
   }
 
-  // Deploy the contract
-  console.log("Deploying contract...");
-  const tFAKEUSD = await ethers.deployContract("tFAKEUSD");
+  // Display whitelist configuration
+  console.log("📝 Initial whitelist configuration:");
+  console.log("  - Deployer (auto):", deployer.address);
+  if (INITIAL_WHITELIST.length > 0) {
+    INITIAL_WHITELIST.forEach((addr, i) => {
+      console.log(`  - Additional ${i + 1}:`, addr);
+    });
+  } else {
+    console.log("  - No additional addresses (set INITIAL_WHITELIST_ADDRESSES to add more)");
+  }
+
+  // Deploy the contract with initial whitelist
+  console.log("\nDeploying contract...");
+  const tFAKEUSD = await ethers.deployContract("tFAKEUSD", [INITIAL_WHITELIST]);
   await tFAKEUSD.waitForDeployment();
 
   const contractAddress = await tFAKEUSD.getAddress();
@@ -31,11 +49,6 @@ async function main() {
   console.log("\n🔗 View on Etherscan:");
   console.log(`https://sepolia.etherscan.io/address/${contractAddress}`);
 
-  // Verify whitelisted addresses
-  console.log("\n📝 Whitelisted addresses:");
-  console.log("  - Deployer:", deployer.address);
-  console.log("  - Additional:", "0x033C4BE38e0265ab17E12f50BEc914e0a56f269f");
-
   // Mint some initial tokens to deployer for testing
   console.log("\n🪙 Minting initial tokens to deployer...");
   const mintTx = await tFAKEUSD.claim();
@@ -45,6 +58,8 @@ async function main() {
   console.log("Deployer tFAKEUSD balance:", ethers.formatEther(deployerBalance), "tFAKEUSD");
 
   console.log("\n🎉 Deployment complete!");
+  console.log("\n💡 To add more whitelisted addresses post-deployment, use:");
+  console.log("   await tFAKEUSD.setWhitelist(address, true)");
 }
 
 main()

@@ -5,16 +5,17 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @title tFAKEUSD
- * @dev Test FakeUSD token for the FakeDEX platform
+ * @title tFAKEUSD (LOCAL EXAMPLE)
+ * @dev This is an EXAMPLE file showing how to add hardcoded whitelist addresses.
+ * 
+ * USAGE: Copy this file to tFAKEUSD.sol and replace the address below with your own.
+ * This file is gitignored so your personal address won't be committed.
+ * 
  * Features:
  * - Public mint with 24-hour cooldown per address
  * - Whitelisted addresses can mint unlimited
  * - No supply cap (unlimited minting)
  * - Default mint amount: 1000 tokens
- * 
- * Security: Whitelist addresses are passed via constructor, not hardcoded.
- * Use setWhitelist() or setWhitelistBatch() post-deployment for additional addresses.
  */
 contract tFAKEUSD is ERC20, Ownable {
     // Cooldown period: 24 hours in seconds
@@ -33,22 +34,16 @@ contract tFAKEUSD is ERC20, Ownable {
     event Minted(address indexed to, uint256 amount);
     event WhitelistUpdated(address indexed account, bool status);
     
-    /**
-     * @dev Constructor that whitelists deployer and optionally additional addresses
-     * @param initialWhitelist Array of addresses to whitelist on deployment (can be empty)
-     */
-    constructor(address[] memory initialWhitelist) ERC20("Test FakeUSD", "tFAKEUSD") Ownable(msg.sender) {
+    constructor() ERC20("Test FakeUSD", "tFAKEUSD") Ownable(msg.sender) {
         // Whitelist the deployer
         whitelisted[msg.sender] = true;
-        emit WhitelistUpdated(msg.sender, true);
         
-        // Whitelist any additional addresses passed in
-        for (uint256 i = 0; i < initialWhitelist.length; i++) {
-            if (initialWhitelist[i] != address(0)) {
-                whitelisted[initialWhitelist[i]] = true;
-                emit WhitelistUpdated(initialWhitelist[i], true);
-            }
-        }
+        // ⚠️ REPLACE THIS ADDRESS WITH YOUR OWN for local development
+        // This file is gitignored so your address won't be committed
+        whitelisted[0x033C4BE38e0265ab17E12f50BEc914e0a56f269f] = true;
+        
+        emit WhitelistUpdated(msg.sender, true);
+        emit WhitelistUpdated(0x033C4BE38e0265ab17E12f50BEc914e0a56f269f, true);
     }
     
     /**
@@ -148,4 +143,3 @@ contract tFAKEUSD is ERC20, Ownable {
         }
     }
 }
-

@@ -4,11 +4,13 @@
 export const CHAIN_ID = 11155111;
 export const CHAIN_NAME = "Ethereum Sepolia";
 
-// tFAKEUSD Token Contract
-export const TFAKEUSD_ADDRESS = process.env.NEXT_PUBLIC_TFAKEUSD_ADDRESS || "0xd0DF684Ef778b4b13A2307087C6265396CE80cCb";
-
-// FakeDexEscrow Contract (Trading Account)
+// Contract addresses - must be set via environment variables
+// See .env.example for required configuration
+export const TFAKEUSD_ADDRESS = process.env.NEXT_PUBLIC_TFAKEUSD_ADDRESS || "";
 export const ESCROW_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_ADDRESS || "";
+
+// Helper to check if contracts are configured
+export const isContractsConfigured = Boolean(TFAKEUSD_ADDRESS && ESCROW_ADDRESS);
 
 // Minimal ABI for tFAKEUSD - only the functions we need
 export const TFAKEUSD_ABI = [
