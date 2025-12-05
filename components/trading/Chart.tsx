@@ -140,6 +140,9 @@ export function Chart({
   const isInitializedRef = useRef(false);
   const lastDataLengthRef = useRef(0);
   const positionLinesRef = useRef<Map<string, { entry: ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>; liquidation: ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> }>>(new Map());
+  // Track if user has manually scrolled away from the right edge - if so, don't auto-scroll
+  const userScrolledAwayRef = useRef(false);
+  const isUpdatingDataRef = useRef(false); // Prevent scroll detection during data updates
   
   // Use external timeframe if provided, otherwise manage internally
   const [internalTimeframe, setInternalTimeframe] = useState(TIMEFRAMES[0]);
@@ -259,6 +262,23 @@ export function Chart({
 
       resizeObserver.observe(container);
       isInitializedRef.current = false;
+      userScrolledAwayRef.current = false;
+
+      // Detect when user manually scrolls/pans the chart
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        // Skip if we're programmatically updating data
+        if (isUpdatingDataRef.current) return;
+        
+        // User is interacting with the chart - check if they scrolled away from right edge
+        const visibleRange = chart.timeScale().getVisibleLogicalRange();
+        if (visibleRange && lastDataLengthRef.current > 0) {
+          // If visible range doesn't include the latest candles, user has scrolled away
+          const isAtRightEdge = visibleRange.to >= lastDataLengthRef.current - 2;
+          if (!isAtRightEdge) {
+            userScrolledAwayRef.current = true;
+          }
+        }
+      });
 
       return () => {
         resizeObserver.disconnect();
@@ -274,6 +294,9 @@ export function Chart({
   // Update chart data with display candles (either client-aggregated or pre-aggregated)
   useEffect(() => {
     if (seriesRef.current && displayData.length > 0) {
+      // Mark that we're updating data to prevent scroll detection from triggering
+      isUpdatingDataRef.current = true;
+      
       const formattedData: CandlestickData[] = displayData.map((d) => ({
         time: d.time as UTCTimestamp,
         open: d.open,
@@ -288,21 +311,24 @@ export function Chart({
       if (!isInitializedRef.current && chartRef.current) {
         chartRef.current.timeScale().fitContent();
         isInitializedRef.current = true;
+        userScrolledAwayRef.current = false; // Reset scroll state on initial load
       }
       
-      // If we have new candles and we're at the right edge, keep scrolling
-      if (displayData.length > lastDataLengthRef.current && isInitializedRef.current && chartRef.current) {
+      // Only auto-scroll if user hasn't manually scrolled away from right edge
+      if (displayData.length > lastDataLengthRef.current && 
+          isInitializedRef.current && 
+          chartRef.current && 
+          !userScrolledAwayRef.current) {
         const timeScale = chartRef.current.timeScale();
-        const visibleRange = timeScale.getVisibleLogicalRange();
-        if (visibleRange) {
-          const isAtRightEdge = visibleRange.to >= lastDataLengthRef.current - 3;
-          if (isAtRightEdge) {
-            timeScale.scrollToPosition(0, false);
-          }
-        }
+        timeScale.scrollToPosition(0, false);
       }
       
       lastDataLengthRef.current = displayData.length;
+      
+      // Reset the flag after a short delay to allow the scroll event to settle
+      setTimeout(() => {
+        isUpdatingDataRef.current = false;
+      }, 50);
     }
   }, [displayData]);
 
@@ -391,12 +417,16 @@ export function Chart({
   const handleFitContent = useCallback(() => {
     if (!chartRef.current) return;
     chartRef.current.timeScale().fitContent();
+    // Reset scroll state so auto-follow resumes
+    userScrolledAwayRef.current = false;
   }, []);
 
   const handleReset = useCallback(() => {
     if (!chartRef.current) return;
     chartRef.current.timeScale().fitContent();
     chartRef.current.timeScale().applyOptions({ barSpacing: 8 });
+    // Reset scroll state so auto-follow resumes
+    userScrolledAwayRef.current = false;
   }, []);
 
   // Handle timeframe change
@@ -404,6 +434,7 @@ export function Chart({
     // Reset view state so chart refits on timeframe change
     isInitializedRef.current = false;
     lastDataLengthRef.current = 0;
+    userScrolledAwayRef.current = false; // Reset scroll state on timeframe change
     
     // Use external callback if provided, otherwise manage internally
     if (onTimeframeChange) {
