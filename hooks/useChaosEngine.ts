@@ -135,28 +135,33 @@ export function useChaosEngine({
   }, []);
 
   /**
-   * Call the server-side Edge Function to generate a canonical candle
+   * Call the server-side Edge Function to generate candles for ALL pairs
+   * This ensures all pairs get updated even when viewing just one
    * Falls back to local generation + direct DB save if Edge Function fails
    */
   const triggerServerCandleGeneration = useCallback(async (localCandle: Candle | null) => {
     if (!isSupabaseConfigured || !supabase) return null;
     
     try {
+      // Generate candles for ALL pairs, not just the current one
+      // This way all pairs stay in sync regardless of which one is being viewed
       const { data, error } = await supabase.functions.invoke('generate-candles', {
-        body: { symbol: symbolRef.current }
+        body: {} // Empty body = process all pairs
       });
       
       if (error) {
-        // Edge Function failed (likely JWT verification issue)
-        // Fall back to saving local candle directly to DB
+        // Edge Function failed - fall back to saving local candle directly to DB
         if (localCandle) {
           await saveCandleToDb(localCandle);
         }
         return null;
       }
       
-      // The candle will arrive via realtime subscription
-      return data?.candles?.[0]?.candle || null;
+      // Find the candle for our current symbol from the response
+      const currentSymbolCandle = data?.candles?.find(
+        (c: { symbol: string }) => c.symbol === symbolRef.current
+      );
+      return currentSymbolCandle?.candle || null;
     } catch (error) {
       // Edge Function failed - fall back to local save
       if (localCandle) {
