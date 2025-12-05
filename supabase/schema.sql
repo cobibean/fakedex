@@ -98,6 +98,9 @@ create index idx_candles_agg_query on public.candles_aggregated (symbol, timefra
 -- Add current_price column to pairs for live price tracking
 alter table public.pairs add column if not exists current_price numeric(38, 18);
 
+-- Add last_candle_time column to track when the last candle was generated
+alter table public.pairs add column if not exists last_candle_time integer;
+
 -- Enable Realtime for pairs table (required for live price updates in sidebar)
 alter publication supabase_realtime add table pairs;
 -- Also enable for candles and trades for live chart/order feed updates

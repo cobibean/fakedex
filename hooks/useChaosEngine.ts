@@ -7,7 +7,7 @@ interface UseChaosEngineOptions {
   symbol: string;
   initialPrice: number;
   intervalMs?: number;
-  isLeader?: boolean; // If true, this client generates and saves candles
+  isLeader?: boolean; // If true, this client TRIGGERS the server to generate candles
 }
 
 // Max candles to store - needs to be high enough for larger timeframes
@@ -30,6 +30,7 @@ export function useChaosEngine({
   const isLeaderRef = useRef(isLeader);
   const symbolRef = useRef(symbol);
   const previousSymbolRef = useRef(symbol);
+  const pendingLocalCandle = useRef<Candle | null>(null);
 
   // Update refs when props change
   useEffect(() => {
@@ -48,23 +49,11 @@ export function useChaosEngine({
     }
   }, [symbol, initialPrice]);
 
-  // Update price in Supabase (only if leader)
-  const updatePriceInDb = useCallback(async (price: number) => {
-    if (!isLeaderRef.current || !isSupabaseConfigured || !supabase) return;
-    
-    try {
-      await supabase
-        .from('pairs')
-        .update({ current_price: price })
-        .eq('symbol', symbolRef.current);
-    } catch (error) {
-      console.error('Failed to update price in DB:', error);
-    }
-  }, []);
-
-  // Save candle to database (only if leader)
+  /**
+   * Save candle to database directly (fallback when Edge Function isn't available)
+   */
   const saveCandleToDb = useCallback(async (candle: Candle) => {
-    if (!isLeaderRef.current || !isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase) return;
     
     try {
       await supabase
@@ -78,10 +67,65 @@ export function useChaosEngine({
           close: candle.close,
           volume: candle.volume,
         }, { onConflict: 'symbol,time' });
+      
+      // Update current price in pairs table
+      await supabase
+        .from('pairs')
+        .update({ current_price: candle.close })
+        .eq('symbol', symbolRef.current);
+        
     } catch (error) {
-      console.error('Failed to save candle:', error);
+      console.error('[CANDLES] Failed to save candle:', error);
     }
   }, []);
+
+  /**
+   * Call the server-side Edge Function to generate a canonical candle
+   * Falls back to local generation + direct DB save if Edge Function fails
+   */
+  const triggerServerCandleGeneration = useCallback(async (localCandle: Candle | null) => {
+    if (!isSupabaseConfigured || !supabase) return null;
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-candles', {
+        body: { symbol: symbolRef.current }
+      });
+      
+      if (error) {
+        // Edge Function failed (likely JWT verification issue)
+        // Fall back to saving local candle directly to DB
+        if (localCandle) {
+          await saveCandleToDb(localCandle);
+        }
+        return null;
+      }
+      
+      // The candle will arrive via realtime subscription
+      return data?.candles?.[0]?.candle || null;
+    } catch (error) {
+      // Edge Function failed - fall back to local save
+      if (localCandle) {
+        await saveCandleToDb(localCandle);
+      }
+      return null;
+    }
+  }, [saveCandleToDb]);
+
+  /**
+   * Generate a LOCAL candle for instant display (hybrid mode)
+   * This will be replaced when the server candle arrives
+   */
+  const generateLocalCandle = useCallback(() => {
+    if (!lastCandleRef.current) return null;
+    
+    const last = lastCandleRef.current;
+    const nextTime = Math.floor(Date.now() / 1000);
+    
+    // Don't generate if we already have a candle for this second
+    if (last.time >= nextTime) return null;
+    
+    return generateNextCandle(last.close, chaosLevel, nextTime);
+  }, [chaosLevel]);
 
   // 1. Fetch Global Chaos & Current Price
   useEffect(() => {
@@ -122,7 +166,7 @@ export function useChaosEngine({
 
     if (!isSupabaseConfigured || !supabase) return;
 
-    // Subscribe to realtime updates
+    // Subscribe to realtime updates for pair settings
     const subscription = supabase
       .channel(`price-updates-${symbol}`)
       .on('postgres_changes', { 
@@ -131,8 +175,8 @@ export function useChaosEngine({
         table: 'pairs',
         filter: `symbol=eq.${symbol}`
       }, (payload) => {
-        // Update price from DB (for non-leader clients)
-        if (!isLeaderRef.current && payload.new.current_price) {
+        // Update price from DB
+        if (payload.new.current_price) {
           setCurrentPrice(Number(payload.new.current_price));
         }
         // Update chaos override
@@ -164,7 +208,7 @@ export function useChaosEngine({
 
     const initializeCandles = async () => {
       if (!isSupabaseConfigured || !supabase) {
-        // No Supabase - generate random history
+        // No Supabase - generate random history locally
         const history = generateInitialHistory(currentPrice, chaosLevel, MAX_CANDLES, 1);
         setCandles(history);
         lastCandleRef.current = history[history.length - 1];
@@ -185,7 +229,7 @@ export function useChaosEngine({
       }
 
       if (existingCandles && existingCandles.length > 0) {
-        // Use existing candles from DB
+        // Use existing candles from DB (server-generated)
         const loadedCandles: Candle[] = existingCandles.map(c => ({
           time: c.time,
           open: Number(c.open),
@@ -200,33 +244,12 @@ export function useChaosEngine({
         lastCandleRef.current = last;
         setCurrentPrice(last.close);
         console.log(`[CANDLES] Loaded ${loadedCandles.length} candles for ${symbol} from DB`);
-      } else if (isLeaderRef.current) {
-        // No candles in DB and we're the leader - generate initial history
-        const history = generateInitialHistory(currentPrice, chaosLevel, MAX_CANDLES, 1);
-        setCandles(history);
-        lastCandleRef.current = history[history.length - 1];
-        
-        // Save initial history to DB
-        console.log(`[CANDLES] Generating and saving ${history.length} candles for ${symbol}`);
-        const candlesToSave = history.map(c => ({
-          symbol,
-          time: c.time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume,
-        }));
-        
-        // Batch insert in chunks to avoid payload limits
-        const chunkSize = 50;
-        for (let i = 0; i < candlesToSave.length; i += chunkSize) {
-          const chunk = candlesToSave.slice(i, i + chunkSize);
-          await supabase.from('candles').upsert(chunk, { onConflict: 'symbol,time' });
-        }
       } else {
-        // Not leader and no candles - generate local history (will sync when leader runs)
-        const history = generateInitialHistory(currentPrice, chaosLevel, MAX_CANDLES, 1);
+        // No candles in DB - start with empty and let server generate
+        console.log(`[CANDLES] No existing candles for ${symbol}, waiting for server generation`);
+        
+        // Generate minimal local history for display while waiting
+        const history = generateInitialHistory(currentPrice, chaosLevel, 60, 1);
         setCandles(history);
         lastCandleRef.current = history[history.length - 1];
       }
@@ -237,9 +260,9 @@ export function useChaosEngine({
     initializeCandles();
   }, [currentPrice, chaosLevel, symbol, isInitialized]);
 
-  // 3. Subscribe to new candles from DB (for non-leader clients)
+  // 3. Subscribe to new candles from DB (ALL clients - both leader and followers)
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || isLeaderRef.current) return;
+    if (!isSupabaseConfigured || !supabase) return;
 
     const subscription = supabase
       .channel(`candles-${symbol}`)
@@ -249,7 +272,7 @@ export function useChaosEngine({
         table: 'candles',
         filter: `symbol=eq.${symbol}`
       }, (payload) => {
-        const newCandle: Candle = {
+        const serverCandle: Candle = {
           time: payload.new.time,
           open: Number(payload.new.open),
           high: Number(payload.new.high),
@@ -259,15 +282,20 @@ export function useChaosEngine({
         };
         
         setCandles(prev => {
-          // Avoid duplicates
-          if (prev.some(c => c.time === newCandle.time)) return prev;
-          const updated = [...prev, newCandle];
-          if (updated.length > MAX_CANDLES) updated.shift();
+          // Replace any local candle with the same time, or add new
+          const filtered = prev.filter(c => c.time !== serverCandle.time);
+          const updated = [...filtered, serverCandle].sort((a, b) => a.time - b.time);
+          if (updated.length > MAX_CANDLES) {
+            return updated.slice(-MAX_CANDLES);
+          }
           return updated;
         });
         
-        lastCandleRef.current = newCandle;
-        setCurrentPrice(newCandle.close);
+        lastCandleRef.current = serverCandle;
+        setCurrentPrice(serverCandle.close);
+        
+        // Clear pending local candle since server candle arrived
+        pendingLocalCandle.current = null;
       })
       .subscribe();
 
@@ -276,34 +304,40 @@ export function useChaosEngine({
     };
   }, [symbol]);
 
-  // 4. Live Updates - Leader generates and saves candles
+  // 4. Leader triggers server-side candle generation every second
+  // Also generates local candle for instant display (hybrid mode)
   useEffect(() => {
-    if (!lastCandleRef.current || !isInitialized) return;
-    if (!isLeaderRef.current) return; // Non-leaders get candles via subscription
+    if (!isInitialized) return;
+    if (!isLeaderRef.current) return; // Only leader triggers server
 
-    const interval = setInterval(() => {
-      const last = lastCandleRef.current!;
-      const nextTime = last.time + 1;
+    const interval = setInterval(async () => {
+      // Generate local candle for instant display
+      const localCandle = generateLocalCandle();
+      if (localCandle) {
+        pendingLocalCandle.current = localCandle;
+        
+        // Add local candle to display immediately
+        setCandles((prev) => {
+          // Don't add if we already have a candle for this time
+          if (prev.some(c => c.time === localCandle.time)) return prev;
+          const newHistory = [...prev, localCandle];
+          if (newHistory.length > MAX_CANDLES) newHistory.shift();
+          return newHistory;
+        });
+        
+        lastCandleRef.current = localCandle;
+        setCurrentPrice(localCandle.close);
+      }
       
-      const next = generateNextCandle(last.close, chaosLevel, nextTime);
+      // Trigger server to generate canonical candle
+      // This will arrive via realtime subscription and replace local candle
+      // If Edge Function fails, it will fall back to saving local candle directly
+      await triggerServerCandleGeneration(localCandle);
       
-      setCandles((prev) => {
-        const newHistory = [...prev, next];
-        if (newHistory.length > MAX_CANDLES) newHistory.shift();
-        return newHistory;
-      });
-      
-      lastCandleRef.current = next;
-      setCurrentPrice(next.close);
-      
-      // Save candle and price to DB
-      saveCandleToDb(next);
-      updatePriceInDb(next.close);
-      
-    }, 1000);
+    }, intervalMs);
 
     return () => clearInterval(interval);
-  }, [chaosLevel, isInitialized, saveCandleToDb, updatePriceInDb]);
+  }, [chaosLevel, isInitialized, intervalMs, generateLocalCandle, triggerServerCandleGeneration]);
 
   return {
     candles,
@@ -505,7 +539,7 @@ export function useAggregatedCandles(symbol: string, timeframe: AggregatedTimefr
           console.log(`[useAggregatedCandles] Loaded ${loadedCandles.length} ${timeframe} candles for ${symbol}`);
         } else {
           // No aggregated candles yet - this is normal for a new deployment
-          console.log(`[useAggregatedCandles] No ${timeframe} candles found for ${symbol} (aggregator may not have run yet)`);
+          console.log(`[useAggregatedCandles] No ${timeframe} candles found for ${symbol} (waiting for server generation)`);
           setCandles([]);
         }
       } catch (err) {
@@ -518,33 +552,33 @@ export function useAggregatedCandles(symbol: string, timeframe: AggregatedTimefr
 
     fetchCandles();
 
-    // Subscribe to new aggregated candles
+    // Subscribe to aggregated candle updates (INSERT and UPDATE)
     if (!isSupabaseConfigured || !supabase) return;
 
     const subscription = supabase
       .channel(`agg-candles-${symbol}-${timeframe}`)
       .on('postgres_changes', {
-        event: 'INSERT',
+        event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'candles_aggregated',
         filter: `symbol=eq.${symbol}`
       }, (payload) => {
         // Only process candles for our timeframe
-        if (payload.new.timeframe !== tfConfig.dbTimeframe) return;
+        if (payload.new && (payload.new as { timeframe?: string }).timeframe !== tfConfig.dbTimeframe) return;
 
         const newCandle: Candle = {
-          time: payload.new.time,
-          open: Number(payload.new.open),
-          high: Number(payload.new.high),
-          low: Number(payload.new.low),
-          close: Number(payload.new.close),
-          volume: Number(payload.new.volume),
+          time: (payload.new as { time: number }).time,
+          open: Number((payload.new as { open: string | number }).open),
+          high: Number((payload.new as { high: string | number }).high),
+          low: Number((payload.new as { low: string | number }).low),
+          close: Number((payload.new as { close: string | number }).close),
+          volume: Number((payload.new as { volume: string | number }).volume),
         };
 
         setCandles(prev => {
-          // Avoid duplicates
-          if (prev.some(c => c.time === newCandle.time)) return prev;
-          const updated = [...prev, newCandle].sort((a, b) => a.time - b.time);
+          // Replace existing candle with same time or add new
+          const filtered = prev.filter(c => c.time !== newCandle.time);
+          const updated = [...filtered, newCandle].sort((a, b) => a.time - b.time);
           // Trim to max candles
           if (updated.length > tfConfig.maxCandles) {
             return updated.slice(-tfConfig.maxCandles);
