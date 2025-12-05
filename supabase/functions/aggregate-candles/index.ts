@@ -71,7 +71,33 @@ Deno.serve(async (req: Request) => {
     
     results.cleaned += rawDeleted || 0;
 
-    // Cleanup old aggregated candles based on retention
+    // IMPORTANT: Remove aggregated candles that are outside the range of raw candles
+    // This prevents price discontinuity when raw candles are regenerated with new random prices
+    for (const symbol of symbols) {
+      // Get the oldest raw candle time for this symbol
+      const { data: oldestRaw } = await supabase
+        .from('candles')
+        .select('time')
+        .eq('symbol', symbol)
+        .order('time', { ascending: true })
+        .limit(1)
+        .single();
+      
+      if (oldestRaw) {
+        // Delete any aggregated candles older than the oldest raw candle
+        // This ensures aggregated data stays in sync with raw data
+        const { count: syncDeleted } = await supabase
+          .from('candles_aggregated')
+          .delete()
+          .eq('symbol', symbol)
+          .lt('time', oldestRaw.time)
+          .select('*', { count: 'exact', head: true });
+        
+        results.cleaned += syncDeleted || 0;
+      }
+    }
+
+    // Cleanup old aggregated candles based on retention (additional safety)
     for (const tf of TIMEFRAMES) {
       const cutoff = now - (tf.retentionDays * 86400);
       const { count: aggDeleted } = await supabase
