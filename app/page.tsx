@@ -5,12 +5,12 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { AlertTriangle, Loader2, GripVertical } from 'lucide-react';
 import { TradePanel } from '@/components/trading/TradePanel';
 import { PairList } from '@/components/trading/PairList';
-import { Chart } from '@/components/trading/Chart';
+import { Chart, TIMEFRAMES, TimeframeConfig } from '@/components/trading/Chart';
 import { OrderFeed } from '@/components/trading/OrderFeed';
 import { ActivePositions } from '@/components/trading/ActivePositions';
 import { XpBar } from '@/components/xp/XpBar';
 import { usePairs } from '@/hooks/usePairs';
-import { useChaosEngine } from '@/hooks/useChaosEngine';
+import { useChaosEngine, useAggregatedCandles, AggregatedTimeframe } from '@/hooks/useChaosEngine';
 import { useBotTrades } from '@/hooks/useBotTrades';
 import { useXP } from '@/hooks/useXP';
 import { usePositions } from '@/hooks/usePositions';
@@ -40,6 +40,7 @@ export default function Home() {
   const [activeSymbol, setActiveSymbol] = useState<string>();
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [bottomPanelView, setBottomPanelView] = useState<'orders' | 'positions'>('orders');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeConfig>(TIMEFRAMES[0]);
   
   // Resizable panels state
   const [sidebarWidth, setSidebarWidth] = useState(200);
@@ -130,6 +131,18 @@ export default function Home() {
     initialPrice: currentPair?.initial_price || 1,
     isLeader: true,
   });
+
+  // Fetch aggregated candles when a longer timeframe is selected
+  const aggregatedTimeframe = selectedTimeframe.isAggregated ? selectedTimeframe.dbTimeframe as AggregatedTimeframe : null;
+  const { candles: aggregatedCandles, loading: aggregatedLoading } = useAggregatedCandles(
+    activeSymbol || pairs[0]?.symbol || 'SHIT',
+    aggregatedTimeframe || '1m' // Default to 1m, but only used when aggregatedTimeframe is not null
+  );
+
+  // Handle timeframe change
+  const handleTimeframeChange = useCallback((tf: TimeframeConfig) => {
+    setSelectedTimeframe(tf);
+  }, []);
 
   useBotTrades(pairs, true);
 
@@ -243,6 +256,10 @@ export default function Home() {
                 {candles.length > 0 ? (
                   <Chart 
                     data={candles} 
+                    aggregatedData={selectedTimeframe.isAggregated ? aggregatedCandles : undefined}
+                    aggregatedLoading={selectedTimeframe.isAggregated ? aggregatedLoading : false}
+                    selectedTimeframe={selectedTimeframe}
+                    onTimeframeChange={handleTimeframeChange}
                     positions={positions.map(p => ({
                       id: p.id,
                       symbol: p.symbol,

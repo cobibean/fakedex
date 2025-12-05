@@ -437,3 +437,127 @@ export function useAllPrices() {
 
   return { prices, loading };
 }
+
+// Timeframe definitions for aggregated candles
+export const AGGREGATED_TIMEFRAMES = {
+  '1m': { seconds: 60, dbTimeframe: '1m', maxCandles: 10080 },      // 7 days
+  '5m': { seconds: 300, dbTimeframe: '5m', maxCandles: 8640 },      // 30 days  
+  '15m': { seconds: 900, dbTimeframe: '15m', maxCandles: 8640 },    // 90 days
+  '1h': { seconds: 3600, dbTimeframe: '1h', maxCandles: 8760 },     // 1 year
+  '4h': { seconds: 14400, dbTimeframe: '4h', maxCandles: 4380 },    // 2 years
+  '1d': { seconds: 86400, dbTimeframe: '1d', maxCandles: 1825 },    // 5 years
+} as const;
+
+export type AggregatedTimeframe = keyof typeof AGGREGATED_TIMEFRAMES;
+
+/**
+ * Hook to fetch aggregated candles for longer timeframes (1m, 5m, 15m, 1h, 4h, 1d)
+ * These are pre-aggregated by the Edge Function and stored in candles_aggregated table
+ */
+export function useAggregatedCandles(symbol: string, timeframe: AggregatedTimeframe) {
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const tfConfig = AGGREGATED_TIMEFRAMES[timeframe];
+
+  useEffect(() => {
+    if (!symbol || !timeframe) return;
+
+    const fetchCandles = async () => {
+      setLoading(true);
+      setError(null);
+
+      if (!isSupabaseConfigured || !supabase) {
+        // Generate mock data if no Supabase
+        const mockCandles = generateInitialHistory(100, 50, 100, tfConfig.seconds);
+        setCandles(mockCandles);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('candles_aggregated')
+          .select('time, open, high, low, close, volume')
+          .eq('symbol', symbol)
+          .eq('timeframe', tfConfig.dbTimeframe)
+          .order('time', { ascending: true })
+          .limit(tfConfig.maxCandles);
+
+        if (fetchError) {
+          console.error(`[useAggregatedCandles] Fetch error for ${symbol} ${timeframe}:`, fetchError);
+          setError(fetchError.message);
+          setLoading(false);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          const loadedCandles: Candle[] = data.map(c => ({
+            time: c.time,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+            volume: Number(c.volume),
+          }));
+          setCandles(loadedCandles);
+          console.log(`[useAggregatedCandles] Loaded ${loadedCandles.length} ${timeframe} candles for ${symbol}`);
+        } else {
+          // No aggregated candles yet - this is normal for a new deployment
+          console.log(`[useAggregatedCandles] No ${timeframe} candles found for ${symbol} (aggregator may not have run yet)`);
+          setCandles([]);
+        }
+      } catch (err) {
+        console.error(`[useAggregatedCandles] Exception:`, err);
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCandles();
+
+    // Subscribe to new aggregated candles
+    if (!isSupabaseConfigured || !supabase) return;
+
+    const subscription = supabase
+      .channel(`agg-candles-${symbol}-${timeframe}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'candles_aggregated',
+        filter: `symbol=eq.${symbol}`
+      }, (payload) => {
+        // Only process candles for our timeframe
+        if (payload.new.timeframe !== tfConfig.dbTimeframe) return;
+
+        const newCandle: Candle = {
+          time: payload.new.time,
+          open: Number(payload.new.open),
+          high: Number(payload.new.high),
+          low: Number(payload.new.low),
+          close: Number(payload.new.close),
+          volume: Number(payload.new.volume),
+        };
+
+        setCandles(prev => {
+          // Avoid duplicates
+          if (prev.some(c => c.time === newCandle.time)) return prev;
+          const updated = [...prev, newCandle].sort((a, b) => a.time - b.time);
+          // Trim to max candles
+          if (updated.length > tfConfig.maxCandles) {
+            return updated.slice(-tfConfig.maxCandles);
+          }
+          return updated;
+        });
+      })
+      .subscribe();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [symbol, timeframe, tfConfig.dbTimeframe, tfConfig.maxCandles, tfConfig.seconds]);
+
+  return { candles, loading, error };
+}

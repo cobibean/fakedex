@@ -1,15 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Info } from 'lucide-react';
 import { usePairs } from '@/hooks/usePairs';
-import { useChaosEngine } from '@/hooks/useChaosEngine';
+import { useChaosEngine, useAggregatedCandles, AggregatedTimeframe } from '@/hooks/useChaosEngine';
 import { useBotTrades } from '@/hooks/useBotTrades';
 import { usePositions } from '@/hooks/usePositions';
-import { Chart } from '@/components/trading/Chart';
+import { Chart, TIMEFRAMES, TimeframeConfig } from '@/components/trading/Chart';
 import { OrderFeed } from '@/components/trading/OrderFeed';
 import { TradePanel } from '@/components/trading/TradePanel';
 import { VicPanel } from '@/components/trading/VicPanel';
@@ -35,6 +35,19 @@ export default function PairTerminalPage() {
     initialPrice,
     intervalMs: 900,
   });
+
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeConfig>(TIMEFRAMES[0]);
+
+  // Fetch aggregated candles when a longer timeframe is selected
+  const aggregatedTimeframe = selectedTimeframe.isAggregated ? selectedTimeframe.dbTimeframe as AggregatedTimeframe : null;
+  const { candles: aggregatedCandles, loading: aggregatedLoading } = useAggregatedCandles(
+    symbol,
+    aggregatedTimeframe || '1m'
+  );
+
+  const handleTimeframeChange = useCallback((tf: TimeframeConfig) => {
+    setSelectedTimeframe(tf);
+  }, []);
 
   const { positions } = usePositions();
   useBotTrades(pairs, true);
@@ -79,6 +92,10 @@ export default function PairTerminalPage() {
           <div className="h-[420px] relative">
             <Chart 
               data={candles}
+              aggregatedData={selectedTimeframe.isAggregated ? aggregatedCandles : undefined}
+              aggregatedLoading={selectedTimeframe.isAggregated ? aggregatedLoading : false}
+              selectedTimeframe={selectedTimeframe}
+              onTimeframeChange={handleTimeframeChange}
               positions={positions.map(p => ({
                 id: p.id,
                 symbol: p.symbol,

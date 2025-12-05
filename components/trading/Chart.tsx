@@ -18,6 +18,7 @@ import {
   ZoomOut, 
   Maximize2,
   RotateCcw,
+  Loader2,
 } from 'lucide-react';
 
 // Position type for chart display
@@ -33,23 +34,41 @@ interface ChartPosition {
   pnlPercent?: number;
 }
 
+// Timeframe configuration
+export interface TimeframeConfig {
+  label: string;
+  seconds: number;
+  isAggregated: boolean; // true = fetch from candles_aggregated, false = aggregate client-side
+  dbTimeframe?: string; // for aggregated timeframes: '1m', '5m', '15m', '1h', '4h', '1d'
+}
+
 interface ChartProps {
-  data: Candle[]; // Base 1-second candles from chaos engine
+  data: Candle[]; // Base 1-second candles from chaos engine (for short timeframes)
+  aggregatedData?: Candle[]; // Pre-aggregated candles (for longer timeframes)
+  aggregatedLoading?: boolean; // Loading state for aggregated data
   positions?: ChartPosition[];
   currentPrice?: number;
   symbol?: string;
+  selectedTimeframe?: TimeframeConfig;
+  onTimeframeChange?: (tf: TimeframeConfig) => void;
   colors?: {
     backgroundColor?: string;
     textColor?: string;
   };
 }
 
-const TIMEFRAMES = [
-  { label: '1s', seconds: 1 },
-  { label: '5s', seconds: 5 },
-  { label: '15s', seconds: 15 },
-  { label: '30s', seconds: 30 },
-  { label: '1m', seconds: 60 },
+// All available timeframes - short ones use client-side aggregation, longer ones use pre-aggregated data
+export const TIMEFRAMES: TimeframeConfig[] = [
+  { label: '1s', seconds: 1, isAggregated: false },
+  { label: '5s', seconds: 5, isAggregated: false },
+  { label: '15s', seconds: 15, isAggregated: false },
+  { label: '30s', seconds: 30, isAggregated: false },
+  { label: '1m', seconds: 60, isAggregated: true, dbTimeframe: '1m' },
+  { label: '5m', seconds: 300, isAggregated: true, dbTimeframe: '5m' },
+  { label: '15m', seconds: 900, isAggregated: true, dbTimeframe: '15m' },
+  { label: '1h', seconds: 3600, isAggregated: true, dbTimeframe: '1h' },
+  { label: '4h', seconds: 14400, isAggregated: true, dbTimeframe: '4h' },
+  { label: '1d', seconds: 86400, isAggregated: true, dbTimeframe: '1d' },
 ];
 
 /**
@@ -103,9 +122,13 @@ function createAggregatedCandle(candles: Candle[], time: number): Candle {
 
 export function Chart({ 
   data, 
+  aggregatedData: externalAggregatedData,
+  aggregatedLoading = false,
   positions = [],
   currentPrice = 0,
   symbol,
+  selectedTimeframe: externalTimeframe,
+  onTimeframeChange,
   colors: {
     backgroundColor = 'transparent',
     textColor = '#D9D9D9',
@@ -118,12 +141,20 @@ export function Chart({
   const lastDataLengthRef = useRef(0);
   const positionLinesRef = useRef<Map<string, { entry: ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>; liquidation: ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> }>>(new Map());
   
-  const [selectedTimeframe, setSelectedTimeframe] = useState(TIMEFRAMES[0]);
+  // Use external timeframe if provided, otherwise manage internally
+  const [internalTimeframe, setInternalTimeframe] = useState(TIMEFRAMES[0]);
+  const selectedTimeframe = externalTimeframe || internalTimeframe;
 
-  // Aggregate candles based on selected timeframe
-  const aggregatedData = useMemo(() => {
-    return aggregateCandles(data, selectedTimeframe.seconds);
-  }, [data, selectedTimeframe.seconds]);
+  // Determine which data to display based on timeframe
+  const displayData = useMemo(() => {
+    if (selectedTimeframe.isAggregated) {
+      // For aggregated timeframes, use pre-aggregated data if available
+      return externalAggregatedData || [];
+    } else {
+      // For short timeframes, aggregate from raw 1-second candles client-side
+      return aggregateCandles(data, selectedTimeframe.seconds);
+    }
+  }, [data, externalAggregatedData, selectedTimeframe]);
 
   // Initialize chart
   useEffect(() => {
@@ -240,10 +271,10 @@ export function Chart({
     }
   }, [backgroundColor, textColor]);
 
-  // Update chart data with aggregated candles
+  // Update chart data with display candles (either client-aggregated or pre-aggregated)
   useEffect(() => {
-    if (seriesRef.current && aggregatedData.length > 0) {
-      const formattedData: CandlestickData[] = aggregatedData.map((d) => ({
+    if (seriesRef.current && displayData.length > 0) {
+      const formattedData: CandlestickData[] = displayData.map((d) => ({
         time: d.time as UTCTimestamp,
         open: d.open,
         high: d.high,
@@ -260,7 +291,7 @@ export function Chart({
       }
       
       // If we have new candles and we're at the right edge, keep scrolling
-      if (aggregatedData.length > lastDataLengthRef.current && isInitializedRef.current && chartRef.current) {
+      if (displayData.length > lastDataLengthRef.current && isInitializedRef.current && chartRef.current) {
         const timeScale = chartRef.current.timeScale();
         const visibleRange = timeScale.getVisibleLogicalRange();
         if (visibleRange) {
@@ -271,9 +302,9 @@ export function Chart({
         }
       }
       
-      lastDataLengthRef.current = aggregatedData.length;
+      lastDataLengthRef.current = displayData.length;
     }
-  }, [aggregatedData]);
+  }, [displayData]);
 
   // Update position lines on chart
   useEffect(() => {
@@ -369,19 +400,28 @@ export function Chart({
   }, []);
 
   // Handle timeframe change
-  const handleTimeframeChange = useCallback((tf: typeof TIMEFRAMES[0]) => {
-    setSelectedTimeframe(tf);
+  const handleTimeframeChange = useCallback((tf: TimeframeConfig) => {
     // Reset view state so chart refits on timeframe change
     isInitializedRef.current = false;
     lastDataLengthRef.current = 0;
-  }, []);
+    
+    // Use external callback if provided, otherwise manage internally
+    if (onTimeframeChange) {
+      onTimeframeChange(tf);
+    } else {
+      setInternalTimeframe(tf);
+    }
+  }, [onTimeframeChange]);
+
+  // Check if we're waiting for aggregated data
+  const isWaitingForData = selectedTimeframe.isAggregated && (aggregatedLoading || displayData.length === 0);
 
   return (
     <div className="w-full h-full flex flex-col">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-2 px-2 py-1.5 bg-gray-900/80 border-b border-gray-800">
-        {/* Timeframes */}
-        <div className="flex items-center gap-1">
+        {/* Timeframes - split into two rows on mobile for better UX */}
+        <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[10px] text-gray-500 uppercase mr-1">TF:</span>
           {TIMEFRAMES.map((tf) => (
             <button
@@ -390,8 +430,11 @@ export function Chart({
               className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
                 selectedTimeframe.label === tf.label
                   ? 'bg-green-600 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  : tf.isAggregated 
+                    ? 'text-blue-400 hover:text-white hover:bg-gray-800'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
               }`}
+              title={tf.isAggregated ? `${tf.label} (historical data)` : tf.label}
             >
               {tf.label}
             </button>
@@ -400,6 +443,9 @@ export function Chart({
 
         {/* Zoom Controls */}
         <div className="flex items-center gap-1">
+          {aggregatedLoading && (
+            <Loader2 className="w-4 h-4 text-blue-400 animate-spin mr-1" />
+          )}
           <button
             onClick={handleZoomIn}
             className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
@@ -432,11 +478,31 @@ export function Chart({
       </div>
 
       {/* Chart Container */}
-      <div
-        ref={chartContainerRef}
-        className="flex-1 w-full bg-gray-900 rounded-b"
-        style={{ minHeight: '300px' }}
-      />
+      <div className="flex-1 w-full bg-gray-900 rounded-b relative" style={{ minHeight: '300px' }}>
+        <div
+          ref={chartContainerRef}
+          className="w-full h-full"
+        />
+        
+        {/* Loading/Empty state overlay for aggregated timeframes */}
+        {isWaitingForData && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+            <div className="text-center">
+              {aggregatedLoading ? (
+                <>
+                  <Loader2 className="w-8 h-8 text-blue-400 animate-spin mx-auto mb-2" />
+                  <p className="text-gray-400 text-sm">Loading {selectedTimeframe.label} candles...</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-400 text-sm mb-1">No {selectedTimeframe.label} data available yet</p>
+                  <p className="text-gray-500 text-xs">Historical data will appear after the aggregator runs</p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

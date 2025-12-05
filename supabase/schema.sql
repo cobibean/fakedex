@@ -78,6 +78,23 @@ create table public.candles (
 -- Index for efficient candle queries
 create index idx_candles_symbol_time on public.candles (symbol, time desc);
 
+-- Aggregated candle history for long-term chart persistence (months/years)
+create table public.candles_aggregated (
+  id uuid primary key default gen_random_uuid(),
+  symbol text not null references public.pairs(symbol) on delete cascade,
+  timeframe text not null check (timeframe in ('1m','5m','15m','1h','4h','1d')),
+  time integer not null, -- Unix timestamp (bucket start)
+  open numeric(38, 18) not null,
+  high numeric(38, 18) not null,
+  low numeric(38, 18) not null,
+  close numeric(38, 18) not null,
+  volume numeric(38, 18) not null,
+  unique (symbol, timeframe, time)
+);
+
+-- Index for efficient aggregated candle queries
+create index idx_candles_agg_query on public.candles_aggregated (symbol, timeframe, time desc);
+
 -- Add current_price column to pairs for live price tracking
 alter table public.pairs add column if not exists current_price numeric(38, 18);
 
@@ -85,6 +102,7 @@ alter table public.pairs add column if not exists current_price numeric(38, 18);
 alter publication supabase_realtime add table pairs;
 -- Also enable for candles and trades for live chart/order feed updates
 alter publication supabase_realtime add table candles;
+alter publication supabase_realtime add table candles_aggregated;
 alter publication supabase_realtime add table trades;
 alter publication supabase_realtime add table user_balances;
 
