@@ -51,15 +51,18 @@ export function useChaosEngine({
 
   /**
    * Save candle to database directly (fallback when Edge Function isn't available)
+   * Also updates aggregated candles for all timeframes
    */
   const saveCandleToDb = useCallback(async (candle: Candle) => {
     if (!isSupabaseConfigured || !supabase) return;
+    const symbol = symbolRef.current;
     
     try {
+      // Save raw candle
       await supabase
         .from('candles')
         .upsert({
-          symbol: symbolRef.current,
+          symbol,
           time: candle.time,
           open: candle.open,
           high: candle.high,
@@ -72,7 +75,59 @@ export function useChaosEngine({
       await supabase
         .from('pairs')
         .update({ current_price: candle.close })
-        .eq('symbol', symbolRef.current);
+        .eq('symbol', symbol);
+      
+      // Update aggregated candles for each timeframe
+      const TIMEFRAMES = [
+        { name: '1m', seconds: 60 },
+        { name: '5m', seconds: 300 },
+        { name: '15m', seconds: 900 },
+        { name: '1h', seconds: 3600 },
+        { name: '4h', seconds: 14400 },
+        { name: '1d', seconds: 86400 },
+      ];
+      
+      for (const tf of TIMEFRAMES) {
+        const bucketStart = Math.floor(candle.time / tf.seconds) * tf.seconds;
+        
+        // Check if bucket exists
+        const { data: existing } = await supabase
+          .from('candles_aggregated')
+          .select('open, high, low, close, volume')
+          .eq('symbol', symbol)
+          .eq('timeframe', tf.name)
+          .eq('time', bucketStart)
+          .single();
+        
+        if (existing) {
+          // Update existing bucket
+          await supabase
+            .from('candles_aggregated')
+            .update({
+              high: Math.max(Number(existing.high), candle.high),
+              low: Math.min(Number(existing.low), candle.low),
+              close: candle.close,
+              volume: Number(existing.volume) + candle.volume,
+            })
+            .eq('symbol', symbol)
+            .eq('timeframe', tf.name)
+            .eq('time', bucketStart);
+        } else {
+          // Create new bucket
+          await supabase
+            .from('candles_aggregated')
+            .insert({
+              symbol,
+              timeframe: tf.name,
+              time: bucketStart,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+              volume: candle.volume,
+            });
+        }
+      }
         
     } catch (error) {
       console.error('[CANDLES] Failed to save candle:', error);
